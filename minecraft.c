@@ -1,0 +1,342 @@
+#include <raylib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+
+#define WIDTH 1800
+#define HEIGHT 1200
+
+#define CHUNK_SIZE 16
+#define CHUNK_HEIGTH 128
+
+#define HEIGHT_GROUND 30
+
+#define WORLD_SIZE 6
+
+static const int p[512] = { 151, 160, 137,  91,  90,  15, 131,  13, 201,  95,  96,  53, 194, 233,   7, 225,
+                      140,  36, 103,  30,  69, 142,   8,  99,  37, 240,  21,  10,  23, 190,   6, 148,
+                      247, 120, 234,  75,   0,  26, 197,  62,  94, 252, 219, 203, 117,  35,  11,  32,
+                       57, 177,  33,  88, 237, 149,  56,  87, 174,  20, 125, 136, 171, 168,  68, 175,
+                       74, 165,  71, 134, 139,  48,  27, 166,  77, 146, 158, 231,  83, 111, 229, 122,
+                       60, 211, 133, 230, 220, 105,  92,  41,  55,  46, 245,  40, 244, 102, 143,  54,
+                       65,  25,  63, 161,   1, 216,  80,  73, 209,  76, 132, 187, 208,  89,  18, 169,
+                      200, 196, 135, 130, 116, 188, 159,  86, 164, 100, 109, 198, 173, 186,   3,  64,
+                       52, 217, 226, 250, 124, 123,   5, 202,  38, 147, 118, 126, 255,  82,  85, 212,
+                      207, 206,  59, 227,  47,  16,  58,  17, 182, 189,  28,  42, 223, 183, 170, 213,
+                      119, 248, 152,   2,  44, 154, 163,  70, 221, 153, 101, 155, 167,  43, 172,   9,
+                      129,  22,  39, 253,  19,  98, 108, 110,  79, 113, 224, 232, 178, 185, 112, 104,
+                      218, 246,  97, 228, 251,  34, 242, 193, 238, 210, 144,  12, 191, 179, 162, 241,
+                       81,  51, 145, 235, 249,  14, 239, 107,  49, 192, 214,  31, 181, 199, 106, 157,
+                      184,  84, 204, 176, 115, 121,  50,  45, 127,   4, 150, 254, 138, 236, 205,  93,
+                      222, 114,  67,  29,  24,  72, 243, 141, 128, 195,  78,  66, 215,  61, 156, 180, 
+                    
+                    151, 160, 137,  91,  90,  15, 131,  13, 201,  95,  96,  53, 194, 233,   7, 225,
+                      140,  36, 103,  30,  69, 142,   8,  99,  37, 240,  21,  10,  23, 190,   6, 148,
+                      247, 120, 234,  75,   0,  26, 197,  62,  94, 252, 219, 203, 117,  35,  11,  32,
+                       57, 177,  33,  88, 237, 149,  56,  87, 174,  20, 125, 136, 171, 168,  68, 175,
+                       74, 165,  71, 134, 139,  48,  27, 166,  77, 146, 158, 231,  83, 111, 229, 122,
+                       60, 211, 133, 230, 220, 105,  92,  41,  55,  46, 245,  40, 244, 102, 143,  54,
+                       65,  25,  63, 161,   1, 216,  80,  73, 209,  76, 132, 187, 208,  89,  18, 169,
+                      200, 196, 135, 130, 116, 188, 159,  86, 164, 100, 109, 198, 173, 186,   3,  64,
+                       52, 217, 226, 250, 124, 123,   5, 202,  38, 147, 118, 126, 255,  82,  85, 212,
+                      207, 206,  59, 227,  47,  16,  58,  17, 182, 189,  28,  42, 223, 183, 170, 213,
+                      119, 248, 152,   2,  44, 154, 163,  70, 221, 153, 101, 155, 167,  43, 172,   9,
+                      129,  22,  39, 253,  19,  98, 108, 110,  79, 113, 224, 232, 178, 185, 112, 104,
+                      218, 246,  97, 228, 251,  34, 242, 193, 238, 210, 144,  12, 191, 179, 162, 241,
+                       81,  51, 145, 235, 249,  14, 239, 107,  49, 192, 214,  31, 181, 199, 106, 157,
+                      184,  84, 204, 176, 115, 121,  50,  45, 127,   4, 150, 254, 138, 236, 205,  93,
+                      222, 114,  67,  29,  24,  72, 243, 141, 128, 195,  78,  66, 215,  61, 156, 180
+                    };
+
+float Fadealg(float t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+float Lerpalg(float t, float a, float b) { return a + t * (b - a); }
+float Grad(int hash, float dx, float dy, float dz) {
+    int h = hash & 15; 
+    float u = h < 8 ? dx : dy; 
+    float v = h < 4 ? dy : (h == 12 || h == 14 ? dx : dz); 
+    return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+}
+
+float PerlinNoise(float x, float y, float z) {
+    int X = (int)floorf(x) & 255;
+    int Y = (int)floorf(y) & 255;
+    int Z = (int)floorf(z) & 255;
+
+    x -= floorf(x);
+    y -= floorf(y);
+    z -= floorf(z);
+
+    float u = Fadealg(x);
+    float v = Fadealg(y);
+    float w = Fadealg(z);
+
+    int A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+    int B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
+
+    float mediaAsseZ_Fronte = Lerpalg(v, 
+        Lerpalg(u, Grad(p[AA], x, y, z),           Grad(p[BA], x - 1, y, z)),
+        Lerpalg(u, Grad(p[AB], x, y - 1, z),       Grad(p[BB], x - 1, y - 1, z))
+    );
+    float mediaAsseZ_Retro = Lerpalg(v, 
+        Lerpalg(u, Grad(p[AA + 1], x, y, z - 1), Grad(p[BA + 1], x - 1, y, z - 1)),
+        Lerpalg(u, Grad(p[AB + 1], x, y - 1, z - 1), Grad(p[BB + 1], x - 1, y - 1, z - 1))
+    );
+    return Lerpalg(w, mediaAsseZ_Fronte, mediaAsseZ_Retro);
+}
+
+typedef struct Chunk{
+    int gridX;
+    int gridZ;
+    char Map[CHUNK_SIZE][CHUNK_HEIGTH][CHUNK_SIZE];
+    Model model;
+    Vector3 position;
+}Chunk;
+
+void BuildChunk(Chunk *c, int gX, int gZ)
+{
+	c->gridX = gX;
+	c->gridZ = gZ;
+	c->position = (Vector3){gX * CHUNK_SIZE, 0.0f, gZ * CHUNK_SIZE};
+	
+	memset(c->Map, 0, sizeof(c->Map));
+	//MAP / floor
+    for(int x = 0; x < CHUNK_SIZE; x++){
+        for(int z = 0; z < CHUNK_SIZE; z++){
+        	float globalX = (gX * CHUNK_SIZE) + x;
+        	float globalZ = (gZ * CHUNK_SIZE) + z;
+            float noise = PerlinNoise(globalX * 0.09f, 0.0f, globalZ * 0.09f);
+            float noiseNorm = (noise + 1.0f) / 2.0f;
+            int heightGround = (int)(noiseNorm * HEIGHT_GROUND) + 2;
+            for(int y = 0; y < heightGround; y++){
+                if (heightGround <= 4) {
+                    c->Map[x][y][z] = 1; 
+                } 
+                else {
+                    if (y == heightGround - 1) {
+                        c->Map[x][y][z] = 2; // Erba
+                    } else if (y > heightGround - 4) {
+                        c->Map[x][y][z] = 3; // Terra
+                    } else {
+                        c->Map[x][y][z] = 4; // Roccia
+                    }
+                }
+            }
+        }
+    }
+    
+    //Algoritmo Mesh optimizated, I use only visible faces
+    int MAX_FACES = CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6;
+    float *vertici = (float*)malloc(MAX_FACES * 4 * 3 * sizeof(float));
+    unsigned short *indici = (unsigned short*)malloc(MAX_FACES * 6 * sizeof(unsigned short));
+    unsigned char *colore = (unsigned char*)malloc(MAX_FACES * 4 * 4 * sizeof(unsigned char));
+    
+    int vCount = 0;
+    int iCount = 0;
+    int cCount = 0;
+
+    for(int x = 0; x < CHUNK_SIZE; x++){
+        for(int y = 0; y < CHUNK_HEIGTH; y++){
+            for(int z = 0; z < CHUNK_SIZE; z++){  
+                if(c->Map[x][y][z] == 0) continue;
+                
+                float r = 0.0f, g = 0.0f, b = 0.0f;
+                if(c->Map[x][y][z] == 1){ r = 0.76f; g = 0.70f; b = 0.50f; }
+                else if(c->Map[x][y][z] == 2){ r = 0.24f; g = 0.51f; b = 0.20f; }
+                else if(c->Map[x][y][z] == 3){ r = 0.40f; g = 0.26f; b = 0.13f; }
+                else if(c->Map[x][y][z] == 4){ r = 0.50f; g = 0.50f; b = 0.50f; }
+                //Upper Face
+                if(y == CHUNK_HEIGTH - 1 || c->Map[x][y+1][z] == 0){
+                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
+                    vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 1.0f;
+                    vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f;
+                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 1.0f;
+
+                    indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
+                    indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
+                    
+                    for(int c = 0; c < 4; c++){
+                        colore[cCount+0] = (unsigned char)(r * 255.0f);
+                        colore[cCount+1] = (unsigned char)(g * 255.0f);
+                        colore[cCount+2] = (unsigned char)(b * 255.0f);
+                        colore[cCount+3] = 255;
+                        cCount += 4;
+                    }
+
+                    vCount += 4; 
+                    iCount += 6;
+                }
+                //Under Face                
+                if(y == 0 || c->Map[x][y-1][z] == 0){
+                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
+                    vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
+                    vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
+                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 0.0f; vertici[vCount*3+11] = z + 1.0f;
+
+                    indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
+                    indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
+
+                    for(int c = 0; c < 4; c++){
+                        colore[cCount+0] = (unsigned char)(r * 255.0f);
+                        colore[cCount+1] = (unsigned char)(g * 255.0f);
+                        colore[cCount+2] = (unsigned char)(b * 255.0f);
+                        colore[cCount+3] = 255;
+                        cCount += 4;
+                    }
+
+                    vCount += 4; 
+                    iCount += 6;
+                }                
+                //DX Face ->
+                if(x == CHUNK_SIZE - 1 || c->Map[x+1][y][z] == 0){
+                    vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
+                    vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 0.0f;
+                    vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
+                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 1.0f;
+
+                    indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
+                    indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
+
+                    for(int c = 0; c < 4; c++){
+                        colore[cCount+0] = (unsigned char)(r * 255.0f);
+                        colore[cCount+1] = (unsigned char)(g * 255.0f);
+                        colore[cCount+2] = (unsigned char)(b * 255.0f);
+                        colore[cCount+3] = 255;
+                        cCount += 4;
+                    }
+
+                    vCount += 4; 
+                    iCount += 6;
+                }
+                //SX Face <- 
+                if(x == 0 || c->Map[x-1][y][z] == 0){
+                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
+                    vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f;
+                    vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f;
+                    vertici[vCount*3+9] = x + 0.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 1.0f;
+
+                    indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
+                    indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
+
+                    for(int c = 0; c < 4; c++){
+                        colore[cCount+0] = (unsigned char)(r * 255.0f);
+                        colore[cCount+1] = (unsigned char)(g * 255.0f);
+                        colore[cCount+2] = (unsigned char)(b * 255.0f);
+                        colore[cCount+3] = 255;
+                        cCount += 4;
+                    }
+
+                    vCount += 4; 
+                    iCount += 6;
+                }
+                //BACK Face
+                if(z == CHUNK_SIZE - 1 || c->Map[x][y][z+1] == 0){
+                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 1.0f;
+                    vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f;
+                    vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f;
+                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 1.0f;
+
+                    indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
+                    indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
+
+                    for(int c = 0; c < 4; c++){
+                        colore[cCount+0] = (unsigned char)(r * 255.0f);
+                        colore[cCount+1] = (unsigned char)(g * 255.0f);
+                        colore[cCount+2] = (unsigned char)(b * 255.0f);
+                        colore[cCount+3] = 255;
+                        cCount += 4;
+                    }
+
+                    vCount += 4; 
+                    iCount += 6;
+                }
+                //FRONT Face
+                if(z == 0 || c->Map[x][y][z-1] == 0){
+                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
+                    vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 0.0f;
+                    vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 0.0f;
+                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 0.0f;
+
+                    indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
+                    indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
+
+                    for(int c = 0; c < 4; c++){
+                        colore[cCount+0] = (unsigned char)(r * 255.0f);
+                        colore[cCount+1] = (unsigned char)(g * 255.0f);
+                        colore[cCount+2] = (unsigned char)(b * 255.0f);
+                        colore[cCount+3] = 255;
+                        cCount += 4;
+                    }
+
+                    vCount += 4; 
+                    iCount += 6;
+                }
+            }
+		}
+	}
+	//MESH - MODEL
+    Mesh ChunkMesh = {0};
+    Mesh *ptrMesh = &ChunkMesh;
+    ptrMesh -> vertexCount = vCount;
+    ptrMesh -> triangleCount = iCount / 3;
+    
+    ptrMesh -> vertices = (float*)realloc(vertici, vCount * 3 * sizeof(float));
+    ptrMesh -> indices = (unsigned short*)realloc(indici, iCount * sizeof(unsigned short));
+    ptrMesh -> colors = (unsigned char*)realloc(colore, cCount * sizeof(unsigned char));
+    UploadMesh(&ChunkMesh, false);
+    
+    //MODEL    
+    c -> model = LoadModelFromMesh(ChunkMesh);               
+}
+
+int main(){
+    
+    InitWindow(WIDTH, HEIGHT, "Minecraft"); 
+    
+    //Build Inilize World
+   	Chunk world[WORLD_SIZE][WORLD_SIZE];
+   	for (int wx = 0; wx < WORLD_SIZE; wx++) {
+        for (int wz = 0; wz < WORLD_SIZE; wz++) {
+            BuildChunk(&world[wx][wz], wx, wz);
+        }
+    }
+    
+    //CAMERA
+    Camera3D camera = {10.0f, 40.0f, -10.0f, 
+                       9.0f, 3.0f, 0.0f,
+                       0.0f, 1.0f, 0.0f,
+                       60.0f,
+                       CAMERA_PERSPECTIVE};
+        
+    SetTargetFPS(240); 
+    DisableCursor();
+    while(!WindowShouldClose())
+    {
+        
+        UpdateCamera(&camera, CAMERA_FIRST_PERSON);
+
+        BeginDrawing();
+            ClearBackground(SKYBLUE);
+            DrawFPS(10, 10);
+
+            BeginMode3D(camera);
+              	//DrawGrid(10, 1.0f);
+            	for (int wx = 0; wx < WORLD_SIZE; wx++) {
+        		    for (int wz = 0; wz < WORLD_SIZE; wz++) {
+            			DrawModel(world[wx][wz].model, world[wx][wz].position, 1.0f, WHITE);
+        			}
+    			}   
+            EndMode3D();
+
+        EndDrawing();
+    }
+    for (int wx = 0; wx < WORLD_SIZE; wx++) {
+        for (int wz = 0; wz < WORLD_SIZE; wz++) {
+      		UnloadModel(world[wx][wz].model);
+     	}
+    }  
+    
+    CloseWindow(); 
+
+    return 0;
+}
