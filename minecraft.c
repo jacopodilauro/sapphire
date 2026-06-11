@@ -1,3 +1,15 @@
+/*
+ 
+ [x] prossimo punto da fare è la gravità, come avevo fatto tempo fa
+ [] inserisco poi le colisioni 3D
+ [] inseirsco il salto
+ [] inseriamo il volo
+ *[] inseriamo il piazzamento e togliemento blocchi
+ [] inseriamo il sole, alberi, montagne
+ [] inseriamo la terza persona e prima persona. 
+
+*/
+
 #include <raylib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,12 +19,19 @@
 #define WIDTH 1800
 #define HEIGHT 1200
 
+#define GRAVITY 0
+
 #define CHUNK_SIZE 16
 #define CHUNK_HEIGTH 128
 
 #define HEIGHT_GROUND 30
 
-#define WORLD_SIZE 6
+#define LOCAL_WORLD_SIZE 7 // == # Chunks attorno al player
+#define MAX_WORLD_SIZE 1024  // == # Chunks massimi di tutto il mondo
+
+#define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
+
+#define GEN_QUEUE_SIZE 64
 
 static const int p[512] = { 151, 160, 137,  91,  90,  15, 131,  13, 201,  95,  96,  53, 194, 233,   7, 225,
                       140,  36, 103,  30,  69, 142,   8,  99,  37, 240,  21,  10,  23, 190,   6, 148,
@@ -85,6 +104,25 @@ float PerlinNoise(float x, float y, float z) {
     return Lerpalg(w, mediaAsseZ_Fronte, mediaAsseZ_Retro);
 }
 
+void GetCoordinatesFromAtlas(int textureID, int vertexID, float *u_out, float *v_out){
+	int img_col = 16;
+	int img_row = 16;
+	
+	int tex_col = textureID % img_col;
+	int tex_row = textureID / img_row;
+	
+	float img_percent_width = 1.0f / img_col;
+	float img_percent_height = 1.0f / img_row;
+	
+	float topX = img_percent_width * tex_col;
+	float topY = img_percent_height * tex_row;
+	
+	if(vertexID == 0) { *u_out = topX; 						*v_out = topY; }
+	if(vertexID == 1) { *u_out = topX; 						*v_out = topY + img_percent_height; }
+	if(vertexID == 2) { *u_out = topX + img_percent_width; 	*v_out = topY; }
+	if(vertexID == 3) { *u_out = topX + img_percent_width; 	*v_out = topY + img_percent_height; } 
+}
+
 typedef struct Chunk{
     int gridX;
     int gridZ;
@@ -92,6 +130,7 @@ typedef struct Chunk{
     Model model;
     Vector3 position;
 }Chunk;
+
 
 void BuildChunk(Chunk *c, int gX, int gZ)
 {
@@ -114,9 +153,9 @@ void BuildChunk(Chunk *c, int gX, int gZ)
                 } 
                 else {
                     if (y == heightGround - 1) {
-                        c->Map[x][y][z] = 2; // Erba
+                        c->Map[x][y][z] = 3; // Erba
                     } else if (y > heightGround - 4) {
-                        c->Map[x][y][z] = 3; // Terra
+                        c->Map[x][y][z] = 2; // Terra
                     } else {
                         c->Map[x][y][z] = 4; // Roccia
                     }
@@ -129,22 +168,22 @@ void BuildChunk(Chunk *c, int gX, int gZ)
     int MAX_FACES = CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6;
     float *vertici = (float*)malloc(MAX_FACES * 4 * 3 * sizeof(float));
     unsigned short *indici = (unsigned short*)malloc(MAX_FACES * 6 * sizeof(unsigned short));
-    unsigned char *colore = (unsigned char*)malloc(MAX_FACES * 4 * 4 * sizeof(unsigned char));
+    float *texcoords = (float*)malloc(MAX_FACES * 4 * 2 * sizeof(float));
     
     int vCount = 0;
     int iCount = 0;
-    int cCount = 0;
+    int tCount = 0;
 
     for(int x = 0; x < CHUNK_SIZE; x++){
         for(int y = 0; y < CHUNK_HEIGTH; y++){
             for(int z = 0; z < CHUNK_SIZE; z++){  
                 if(c->Map[x][y][z] == 0) continue;
                 
-                float r = 0.0f, g = 0.0f, b = 0.0f;
-                if(c->Map[x][y][z] == 1){ r = 0.76f; g = 0.70f; b = 0.50f; }
-                else if(c->Map[x][y][z] == 2){ r = 0.24f; g = 0.51f; b = 0.20f; }
-                else if(c->Map[x][y][z] == 3){ r = 0.40f; g = 0.26f; b = 0.13f; }
-                else if(c->Map[x][y][z] == 4){ r = 0.50f; g = 0.50f; b = 0.50f; }
+                int textureID = 0;
+                if(c->Map[x][y][z] == 1){ textureID = 18; } //sabbia
+                else if(c->Map[x][y][z] == 2){ textureID = 2; } // terra
+                else if(c->Map[x][y][z] == 3){ textureID = 3; } // erba
+                else if(c->Map[x][y][z] == 4){ textureID = 1; } // roccia
                 //Upper Face
                 if(y == CHUNK_HEIGTH - 1 || c->Map[x][y+1][z] == 0){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
@@ -155,12 +194,14 @@ void BuildChunk(Chunk *c, int gX, int gZ)
                     indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
                     indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
                     
-                    for(int c = 0; c < 4; c++){
-                        colore[cCount+0] = (unsigned char)(r * 255.0f);
-                        colore[cCount+1] = (unsigned char)(g * 255.0f);
-                        colore[cCount+2] = (unsigned char)(b * 255.0f);
-                        colore[cCount+3] = 255;
-                        cCount += 4;
+                    int tmpFaceID = textureID == 3 ? 0 : textureID;
+                    
+                    for(int nVer = 0; nVer < 4; nVer++){
+                        float u, v;
+                        GetCoordinatesFromAtlas(tmpFaceID, nVer, &u, &v);
+                        texcoords[tCount+0] = u;
+                        texcoords[tCount+1] = v;
+                        tCount += 2;
                     }
 
                     vCount += 4; 
@@ -176,12 +217,14 @@ void BuildChunk(Chunk *c, int gX, int gZ)
                     indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
                     indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
 
-                    for(int c = 0; c < 4; c++){
-                        colore[cCount+0] = (unsigned char)(r * 255.0f);
-                        colore[cCount+1] = (unsigned char)(g * 255.0f);
-                        colore[cCount+2] = (unsigned char)(b * 255.0f);
-                        colore[cCount+3] = 255;
-                        cCount += 4;
+					int tmpFaceID = textureID == 3 ? 2 : textureID;
+
+                    for(int nVer = 0; nVer < 4; nVer++){
+                        float u, v;
+                        GetCoordinatesFromAtlas(tmpFaceID, nVer, &u, &v);
+                        texcoords[tCount+0] = u;
+                        texcoords[tCount+1] = v;
+                        tCount += 2;
                     }
 
                     vCount += 4; 
@@ -189,87 +232,71 @@ void BuildChunk(Chunk *c, int gX, int gZ)
                 }                
                 //DX Face ->
                 if(x == CHUNK_SIZE - 1 || c->Map[x+1][y][z] == 0){
-                    vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
-                    vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 0.0f;
-                    vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
-                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 1.0f;
+                    vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; // Top-Left
+                    vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; // Bottom-Left
+                    vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; // Top-Right
+                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 0.0f; vertici[vCount*3+11] = z + 0.0f; // Bottom-Right
 
                     indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
                     indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
 
-                    for(int c = 0; c < 4; c++){
-                        colore[cCount+0] = (unsigned char)(r * 255.0f);
-                        colore[cCount+1] = (unsigned char)(g * 255.0f);
-                        colore[cCount+2] = (unsigned char)(b * 255.0f);
-                        colore[cCount+3] = 255;
-                        cCount += 4;
+                    for(int nVer = 0; nVer < 4; nVer++){
+                        float u, v;
+                        GetCoordinatesFromAtlas(textureID, nVer, &u, &v);
+                        texcoords[tCount+0] = u; texcoords[tCount+1] = v; tCount += 2;
                     }
-
-                    vCount += 4; 
-                    iCount += 6;
+                    vCount += 4; iCount += 6;
                 }
-                //SX Face <- 
+                //SX Face <-
                 if(x == 0 || c->Map[x-1][y][z] == 0){
-                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
-                    vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f;
-                    vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f;
-                    vertici[vCount*3+9] = x + 0.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 1.0f;
+                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
+                    vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
+                    vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f;
+                    vertici[vCount*3+9] = x + 0.0f; vertici[vCount*3+10] = y + 0.0f; vertici[vCount*3+11] = z + 1.0f;
 
                     indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
                     indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
 
-                    for(int c = 0; c < 4; c++){
-                        colore[cCount+0] = (unsigned char)(r * 255.0f);
-                        colore[cCount+1] = (unsigned char)(g * 255.0f);
-                        colore[cCount+2] = (unsigned char)(b * 255.0f);
-                        colore[cCount+3] = 255;
-                        cCount += 4;
+                    for(int nVer = 0; nVer < 4; nVer++){
+                        float u, v;
+                        GetCoordinatesFromAtlas(textureID, nVer, &u, &v);
+                        texcoords[tCount+0] = u; texcoords[tCount+1] = v; tCount += 2;
                     }
-
-                    vCount += 4; 
-                    iCount += 6;
+                    vCount += 4; iCount += 6;
                 }
                 //BACK Face
                 if(z == CHUNK_SIZE - 1 || c->Map[x][y][z+1] == 0){
-                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 1.0f;
-                    vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f;
-                    vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f;
-                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 1.0f;
+                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; 
+                    vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; 
+                    vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f; 
+                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 0.0f; vertici[vCount*3+11] = z + 1.0f;
 
                     indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
                     indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
 
-                    for(int c = 0; c < 4; c++){
-                        colore[cCount+0] = (unsigned char)(r * 255.0f);
-                        colore[cCount+1] = (unsigned char)(g * 255.0f);
-                        colore[cCount+2] = (unsigned char)(b * 255.0f);
-                        colore[cCount+3] = 255;
-                        cCount += 4;
+                    for(int nVer = 0; nVer < 4; nVer++){
+                        float u, v;
+                        GetCoordinatesFromAtlas(textureID, nVer, &u, &v);
+                        texcoords[tCount+0] = u; texcoords[tCount+1] = v; tCount += 2;
                     }
-
-                    vCount += 4; 
-                    iCount += 6;
+                    vCount += 4; iCount += 6;
                 }
                 //FRONT Face
                 if(z == 0 || c->Map[x][y][z-1] == 0){
-                    vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
-                    vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 0.0f;
-                    vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 0.0f;
-                    vertici[vCount*3+9] = x + 1.0f; vertici[vCount*3+10] = y + 1.0f; vertici[vCount*3+11] = z + 0.0f;
+                    vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f; 
+                    vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f; 
+                    vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; 
+                    vertici[vCount*3+9] = x + 0.0f; vertici[vCount*3+10] = y + 0.0f; vertici[vCount*3+11] = z + 0.0f;
 
                     indici[iCount+0] = vCount + 0; indici[iCount+1] = vCount + 1; indici[iCount+2] = vCount + 2;
                     indici[iCount+3] = vCount + 1; indici[iCount+4] = vCount + 3; indici[iCount+5] = vCount + 2;
 
-                    for(int c = 0; c < 4; c++){
-                        colore[cCount+0] = (unsigned char)(r * 255.0f);
-                        colore[cCount+1] = (unsigned char)(g * 255.0f);
-                        colore[cCount+2] = (unsigned char)(b * 255.0f);
-                        colore[cCount+3] = 255;
-                        cCount += 4;
+                    for(int nVer = 0; nVer < 4; nVer++){
+                        float u, v;
+                        GetCoordinatesFromAtlas(textureID, nVer, &u, &v);
+                        texcoords[tCount+0] = u; texcoords[tCount+1] = v; tCount += 2;
                     }
-
-                    vCount += 4; 
-                    iCount += 6;
+                    vCount += 4; iCount += 6;
                 }
             }
 		}
@@ -282,7 +309,7 @@ void BuildChunk(Chunk *c, int gX, int gZ)
     
     ptrMesh -> vertices = (float*)realloc(vertici, vCount * 3 * sizeof(float));
     ptrMesh -> indices = (unsigned short*)realloc(indici, iCount * sizeof(unsigned short));
-    ptrMesh -> colors = (unsigned char*)realloc(colore, cCount * sizeof(unsigned char));
+    ptrMesh -> texcoords = (float*)realloc(texcoords, tCount * sizeof(float));
     UploadMesh(&ChunkMesh, false);
     
     //MODEL    
@@ -292,14 +319,8 @@ void BuildChunk(Chunk *c, int gX, int gZ)
 int main(){
     
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
-    
-    //Build Inilize World
-   	Chunk world[WORLD_SIZE][WORLD_SIZE];
-   	for (int wx = 0; wx < WORLD_SIZE; wx++) {
-        for (int wz = 0; wz < WORLD_SIZE; wz++) {
-            BuildChunk(&world[wx][wz], wx, wz);
-        }
-    }
+    Texture2D fnTerrain = LoadTexture("terrain.png");
+    SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
     
     //CAMERA
     Camera3D camera = {10.0f, 40.0f, -10.0f, 
@@ -307,22 +328,117 @@ int main(){
                        0.0f, 1.0f, 0.0f,
                        60.0f,
                        CAMERA_PERSPECTIVE};
-        
+    
+    //PLAYER
+    static BoundingBox BoxPlayer;
+    static BoundingBox BoxCollisionPlayer;
+    
+    int chunkPlayerX = (int) floorf(camera.position.x / CHUNK_SIZE); 
+    int chunkPlayerZ = (int) floorf(camera.position.z / CHUNK_SIZE); 
+
+    int lastChunkPlayerX = chunkPlayerX;
+    int lastChunkPlayerZ = chunkPlayerZ;
+    
+    // Build Initialize World 
+    static Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
+    for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+        for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+            // Coordinate globali del chunk desiderato
+            int gx = chunkPlayerX + dx;
+            int gz = chunkPlayerZ + dz;
+            int wx = (gx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+            int wz = (gz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+            
+            BuildChunk(&world[wx][wz], gx, gz);
+            world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+        }
+    }
+    
+    
+    // Generation Queue
+    // to avoid the all the new build of the new chunk will execute in only one frame,
+    // 		I split them, in the queue, only one build for each frame.
+    int genQueueGX[GEN_QUEUE_SIZE];   
+	int genQueueGZ[GEN_QUEUE_SIZE];   
+	int genQueueWX[GEN_QUEUE_SIZE];   
+	int genQueueWZ[GEN_QUEUE_SIZE];
+	int genHead = 0;
+	int genTail = 0;
+
     SetTargetFPS(240); 
     DisableCursor();
+    float dt; Vector3 velocityPlayer = {0};
     while(!WindowShouldClose())
     {
+		
+		//GRAVITY
+		dt = GetFrameTime();
+		velocityPlayer.y -= GRAVITY * dt;
+		camera.position.y += velocityPlayer.y * dt;
+		// Collision 
+		
+        UpdateCamera(&camera, CAMERA_FREE);
+        BoxPlayer.min =  (Vector3){ camera.position.x - 0.5f, camera.position.y - 2.0f, camera.position.z - 0.5f };
+		BoxPlayer.max =  (Vector3){ camera.position.x + 0.5f, camera.position.y - 0.15f, camera.position.z + 0.5f };
+		
+		
+		chunkPlayerX = (int) floorf(camera.position.x / CHUNK_SIZE); 
+		chunkPlayerZ = (int) floorf(camera.position.z / CHUNK_SIZE); 
         
-        UpdateCamera(&camera, CAMERA_FIRST_PERSON);
+        if (chunkPlayerX != lastChunkPlayerX || chunkPlayerZ != lastChunkPlayerZ) {
+            for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+                for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+                    
+                    int gx = chunkPlayerX + dx;
+                    int gz = chunkPlayerZ + dz;
+                    
+                    // Calcoliamo in quale slot dell'array DOVREBBE trovarsi questo chunk
+                    int wx = (gx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+                    int wz = (gz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+                    
+                    // Se lo slot non contiene le coordinate corrette, significa che c'è
+                    // un vecchio chunk ormai lontano. Lo sovrascriviamo!
+                    if (world[wx][wz].gridX != gx || world[wx][wz].gridZ != gz) {
+                        if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
+                        world[wx][wz].model = (Model){0};
+                        
+                        // Aggiorniamo subito gridX e gridZ per non rimetterlo in coda ai frame successivi
+                        world[wx][wz].gridX = gx;
+                        world[wx][wz].gridZ = gz;
 
+                        // Mettiamo in coda la generazione
+                        genQueueGX[genTail] = gx;
+                        genQueueGZ[genTail] = gz;
+                        genQueueWX[genTail] = wx;
+                        genQueueWZ[genTail] = wz;
+                        genTail = (genTail + 1) % GEN_QUEUE_SIZE;
+                    }
+                }
+            }
+            lastChunkPlayerX = chunkPlayerX;
+            lastChunkPlayerZ = chunkPlayerZ;
+        }
+		
+		if (genHead != genTail) {
+ 			int wx = genQueueWX[genHead];
+    		int wz = genQueueWZ[genHead];
+    		int gx = genQueueGX[genHead];
+    		int gz = genQueueGZ[genHead];
+    		genHead = (genHead + 1) % GEN_QUEUE_SIZE;
+    		BuildChunk(&world[wx][wz], gx, gz);
+    		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+		}
+        
         BeginDrawing();
             ClearBackground(SKYBLUE);
             DrawFPS(10, 10);
 
             BeginMode3D(camera);
               	//DrawGrid(10, 1.0f);
-            	for (int wx = 0; wx < WORLD_SIZE; wx++) {
-        		    for (int wz = 0; wz < WORLD_SIZE; wz++) {
+              	//DrawBoundingBox(BoxPlayer, RED);
+              	
+            	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
+        		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
             			DrawModel(world[wx][wz].model, world[wx][wz].position, 1.0f, WHITE);
         			}
     			}   
@@ -330,12 +446,12 @@ int main(){
 
         EndDrawing();
     }
-    for (int wx = 0; wx < WORLD_SIZE; wx++) {
-        for (int wz = 0; wz < WORLD_SIZE; wz++) {
+    for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
+        for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
       		UnloadModel(world[wx][wz].model);
      	}
     }  
-    
+    UnloadTexture(fnTerrain);
     CloseWindow(); 
 
     return 0;
