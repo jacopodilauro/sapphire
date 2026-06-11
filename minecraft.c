@@ -1,9 +1,11 @@
 /*
  [x] prossimo punto da fare è la gravità, come avevo fatto tempo fa
- [] inserisco poi le colisioni 3D
- [] inseirsco il salto
  [x] inseriamo il volo
  [x] inseriamo il piazzamento e togliemento blocchi
+ [] ottimizzare la generazione chunk
+ [] poter selzionare blocchi da piazzare
+ [] inserisco poi le colisioni 3D
+ [] inseirsco il salto
  [] inseriamo il sole, alberi, montagne
  [] inseriamo la terza persona e prima persona. 
 */
@@ -25,7 +27,7 @@
 
 #define HEIGHT_GROUND 110
 
-#define LOCAL_WORLD_SIZE 7
+#define LOCAL_WORLD_SIZE 15
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
 #define MAX_RAY_DISTANCE 6
@@ -551,15 +553,15 @@ int main(){
 	Texture2D gui = LoadTexture("gui.png");
     
     //CAMERA
-    Camera3D camera = {10.0f, 40.0f, -10.0f, 
+    Camera3D camera = {10.0f, 230.0f, -10.0f, 
                        9.0f, 3.0f, 0.0f,
                        0.0f, 1.0f, 0.0f,
                        60.0f,
                        CAMERA_PERSPECTIVE};
     
 	//RAY COLLISION
-	Vector3 dist;// = Vector3Subtract(camera.target, camera.position);
-	Vector3 lookDir;// = Vector3Normalize(dist);
+	Vector3 dist;
+	Vector3 lookDir;
 	Vector3 ray = camera.position;
     
     int chunkPlayerX = (int) floorf(camera.position.x / CHUNK_SIZE); 
@@ -570,8 +572,8 @@ int main(){
     
     // Build Initialize World 
     //Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
-	Game game;
-	InizializeWorld(game.world, chunkPlayerX, chunkPlayerZ, fnTerrain);
+	Game *game = (Game*)malloc(sizeof(Game));
+	InizializeWorld(game -> world, chunkPlayerX, chunkPlayerZ, fnTerrain);
 
     SetTargetFPS(540); 
     DisableCursor();
@@ -588,7 +590,7 @@ int main(){
         UpdateCamera(&camera, CAMERA_FREE);
 		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f", camera.position.x, camera.position.y, camera.position.z);
 		
-		BuildChunk(game.world, camera.position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
+		BuildChunk(game -> world, camera.position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
 
 		if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
 			dist = Vector3Subtract(camera.target, camera.position);
@@ -604,7 +606,7 @@ int main(){
 				int gy = (int)floorf(ray.y);
 				int gz = (int)floorf(ray.z);
 				
-				if(GetBlockGlobal(game.world, gx, gy, gz) != 0){ // I hit it
+				if(GetBlockGlobal(game -> world, gx, gy, gz) != 0){ // I hit it
 					int chunkX = (int)floorf((float)gx / CHUNK_SIZE);
 					int chunkZ = (int)floorf((float)gz / CHUNK_SIZE);
 					int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -613,12 +615,12 @@ int main(){
 					int lx = (gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					int lz = (gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					
-					game.world[wx][wz].Map[lx][gy][lz] = 0;
-					UpdateChunkGraph(game.world, chunkX, chunkZ, fnTerrain);
-					if (lx == 0) { UpdateChunkGraph(game.world, chunkX - 1, chunkZ, fnTerrain);}
-					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX + 1, chunkZ, fnTerrain);}
-					if (lz == 0) { UpdateChunkGraph(game.world, chunkX, chunkZ - 1, fnTerrain);}
-					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX, chunkZ + 1, fnTerrain);}
+					game -> world[wx][wz].Map[lx][gy][lz] = 0;
+					UpdateChunkGraph(game -> world, chunkX, chunkZ, fnTerrain);
+					if (lx == 0) { UpdateChunkGraph(game -> world, chunkX - 1, chunkZ, fnTerrain);}
+					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX + 1, chunkZ, fnTerrain);}
+					if (lz == 0) { UpdateChunkGraph(game -> world, chunkX, chunkZ - 1, fnTerrain);}
+					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX, chunkZ + 1, fnTerrain);}
 					
 					break;
 				}
@@ -642,7 +644,7 @@ int main(){
 				int gy = (int)floorf(ray.y);
 				int gz = (int)floorf(ray.z);
 				
-				if(GetBlockGlobal(game.world, gx, gy, gz) != 0){ // I hit it
+				if(GetBlockGlobal(game -> world, gx, gy, gz) != 0){ // I hit it
 					int chunkX = (int)floorf((float)prec_gx / CHUNK_SIZE);
 					int chunkZ = (int)floorf((float)prec_gz / CHUNK_SIZE);
 					int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -651,12 +653,12 @@ int main(){
 					int lx = (prec_gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					int lz = (prec_gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					
-					game.world[wx][wz].Map[lx][prec_gy][lz] = 1;
-					UpdateChunkGraph(game.world, chunkX, chunkZ, fnTerrain);
-					if (lx == 0) { UpdateChunkGraph(game.world, chunkX - 1, chunkZ, fnTerrain);}
-					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX + 1, chunkZ, fnTerrain);}
-					if (lz == 0) { UpdateChunkGraph(game.world, chunkX, chunkZ - 1, fnTerrain);}
-					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX, chunkZ + 1, fnTerrain);}
+					game -> world[wx][wz].Map[lx][prec_gy][lz] = 1;
+					UpdateChunkGraph(game -> world, chunkX, chunkZ, fnTerrain);
+					if (lx == 0) { UpdateChunkGraph(game -> world, chunkX - 1, chunkZ, fnTerrain);}
+					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX + 1, chunkZ, fnTerrain);}
+					if (lz == 0) { UpdateChunkGraph(game -> world, chunkX, chunkZ - 1, fnTerrain);}
+					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX, chunkZ + 1, fnTerrain);}
 					
 					break;
 				}
@@ -673,7 +675,7 @@ int main(){
               	//DrawBoundingBox(BoxPlayer, RED);
             	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-            			DrawModel(game.world[wx][wz].model, game.world[wx][wz].position, 1.0f, WHITE);
+            			DrawModel(game -> world[wx][wz].model, game -> world[wx][wz].position, 1.0f, WHITE);
         			}
     			}   
             EndMode3D();
@@ -686,7 +688,7 @@ int main(){
     }
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-      		UnloadModel(game.world[wx][wz].model);
+      		UnloadModel(game -> world[wx][wz].model);
      	}
     }  
     UnloadTexture(fnTerrain);
