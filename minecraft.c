@@ -1,13 +1,11 @@
 /*
- 
  [x] prossimo punto da fare è la gravità, come avevo fatto tempo fa
  [] inserisco poi le colisioni 3D
  [] inseirsco il salto
- [] inseriamo il volo
- *[] inseriamo il piazzamento e togliemento blocchi
+ [x] inseriamo il volo
+ [x] inseriamo il piazzamento e togliemento blocchi
  [] inseriamo il sole, alberi, montagne
  [] inseriamo la terza persona e prima persona. 
-
 */
 
 #include <raylib.h>
@@ -25,20 +23,18 @@
 #define CHUNK_SIZE 16
 #define CHUNK_HEIGTH 128
 
-#define HEIGHT_GROUND 80
+#define HEIGHT_GROUND 110
 
-#define LOCAL_WORLD_SIZE 9 // == # Chunks attorno al player
-#define MAX_WORLD_SIZE 1024  // == # Chunks massimi di tutto il mondo
-
+#define LOCAL_WORLD_SIZE 7
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
 #define MAX_RAY_DISTANCE 6
 #define STEP_RAY_SIZE 0.05
 
-#define NINE_BLOCKS_SIZE 9
-
 #define GEN_QUEUE_SIZE 64
 
+int HEIGHTGROUND;
+int WATER_LEVEL;
 // Generation Queue
 int genQueueGX[GEN_QUEUE_SIZE];   
 int genQueueGZ[GEN_QUEUE_SIZE];   
@@ -46,6 +42,35 @@ int genQueueWX[GEN_QUEUE_SIZE];
 int genQueueWZ[GEN_QUEUE_SIZE];
 int genHead = 0;
 int genTail = 0;
+
+typedef struct Chunk{
+    int gridX;
+    int gridZ;
+    char Map[CHUNK_SIZE][CHUNK_HEIGTH][CHUNK_SIZE];
+    Model model;
+    Vector3 position;
+}Chunk; 
+
+typedef struct Game{
+	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
+}Game;
+
+enum BlockType {
+	AIR 	= 0,
+	SAND 	= 1,
+	DIRT 	= 2,
+	GRASS 	= 3,
+	ROCK 	= 4,
+	WATER 	= 5,
+	SNOW 	= 6,
+	BADROCK = 7,
+	LEAF 	= 8,
+	LOG 	= 9
+};
+
+int IsTransparent(int blockID) {
+    return (blockID == AIR || blockID == WATER || blockID == LEAF);
+}
 
 void DrawGUI(Texture2D gui){
 	
@@ -160,13 +185,25 @@ void GetCoordinatesFromAtlas(int textureID, int vertexID, float *u_out, float *v
 	if(vertexID == 3) { *u_out = topX + img_percent_width; 	*v_out = topY + img_percent_height; } 
 }
 
-typedef struct Chunk{
-    int gridX;
-    int gridZ;
-    char Map[CHUNK_SIZE][CHUNK_HEIGTH][CHUNK_SIZE];
-    Model model;
-    Vector3 position;
-}Chunk; 
+void BuildTree(Chunk *c, int x, int y, int z){
+    for(int j = y + 1; j < y + 7 && j < CHUNK_HEIGTH; j++) {
+        c->Map[x][j][z] = LOG;
+    }
+    int top = y + 7;
+    for(int kx = x - 2; kx <= x + 2; kx++){
+        for(int kz = z - 2; kz <= z + 2; kz++){
+            for(int ky = top - 2; ky <= top; ky++){
+                if(kx >= 0 && kx < CHUNK_SIZE && 
+                   kz >= 0 && kz < CHUNK_SIZE && 
+                   ky >= 0 && ky < CHUNK_HEIGTH) {
+                    if(c->Map[kx][ky][kz] == AIR) {
+                        c->Map[kx][ky][kz] = LEAF;
+                    }
+                }
+            }
+        }
+    }
+}
 
 char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int gy, int gz){
     if(gy < 0 || gy >= CHUNK_HEIGTH) return 0;
@@ -205,23 +242,48 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
         	float globalZ = (gZ * CHUNK_SIZE) + z;
             //float noise = PerlinNoise(globalX * 0.09f, 0.0f, globalZ * 0.09f);
 			float noise = FractalBrownianMotion(globalX, globalZ, octaves, persistence, lacunarity, scale);
-            float noiseNorm = pow((noise + 1.0f) / 2.0f, 3.0f);
-            int heightGround = (int)(noiseNorm * HEIGHT_GROUND) + 2;
-            for(int y = 0; y < heightGround; y++){
-                if (heightGround == 4) {
-                    c->Map[x][y][z] = 1; 
-                }else if (heightGround < 4){
-					c->Map[x][y][z] = 5; // Acqua	
-				}
-				if (y == heightGround - 1) {
-					c->Map[x][y][z] = 3; // Erba
-				} else if (y > heightGround - 4) {
-					c->Map[x][y][z] = 2; // Terra
-				} else{
-					c->Map[x][y][z] = 4; // Roccia
-				}
+            float noiseNorm = pow((noise + 1.0f) / 2.0f, 2.0f);
+            HEIGHTGROUND = (int)(noiseNorm * HEIGHT_GROUND) + 2;
+            
+			float waterNoiseNorm = pow((-0.2f + 1.0f) / 2.0f, 2.0f);
+            WATER_LEVEL = (int)(waterNoiseNorm * HEIGHT_GROUND) + 2;
+
+            for(int y = 0; y < HEIGHTGROUND; y++){
+				
+				if(y == 0) {c->Map[x][y][z] = BADROCK;}
+				else if (noise < -0.3f) { 
+                    if (y >= HEIGHTGROUND - 2) c->Map[x][y][z] = SAND;
+                    else c->Map[x][y][z] = ROCK;
+                } 
+                else if (noise < -0.15f) { 
+                    if (y >= HEIGHTGROUND - 3) c->Map[x][y][z] = SAND; 
+                    else c->Map[x][y][z] = ROCK; 
+                } 
+				else {
+                    if (HEIGHTGROUND > WATER_LEVEL + 28) { 
+                        if (y == HEIGHTGROUND - 1) c->Map[x][y][z] = SNOW;
+                        else c->Map[x][y][z] = ROCK;
+                    } 
+                    else if (HEIGHTGROUND > WATER_LEVEL + 20) { 
+                        c->Map[x][y][z] = ROCK;
+                    } 
+                    else { 
+                        if (y == HEIGHTGROUND - 1){ 
+							c->Map[x][y][z] = GRASS;
+							if(y == HEIGHTGROUND - 1) { if(x == z && x == CHUNK_SIZE/2)BuildTree( c, x, y, z); }
+						}
+                        else if (y > HEIGHTGROUND - 4) c->Map[x][y][z] = DIRT;
+                        else c->Map[x][y][z] = ROCK;
+                    }
+                }
             }
-        }
+
+            if (HEIGHTGROUND <= WATER_LEVEL) {
+                for (int y = HEIGHTGROUND; y <= WATER_LEVEL; y++) {
+                    c->Map[x][y][z] = 5;
+                }
+            }
+        }    
     }
 }
 
@@ -247,13 +309,17 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
 				
 				
 				
-                int textureID = 0;
-                if(c->Map[x][y][z] == 1){ textureID = 18; } //sabbia
-                else if(c->Map[x][y][z] == 2){ textureID = 2; } // terra
-                else if(c->Map[x][y][z] == 3){ textureID = 3; } // erba
-                else if(c->Map[x][y][z] == 4){ textureID = 1; } // roccia
-				else if(c->Map[x][y][z] == 5){ textureID = 207; } // acqua
-                
+                int textureID = AIR;
+                if(c->Map[x][y][z] == SAND){ textureID = 18; } //sabbia
+                else if(c->Map[x][y][z] == DIRT){ textureID = 2; } // terra
+                else if(c->Map[x][y][z] == GRASS){ textureID = 3; } // erba
+                else if(c->Map[x][y][z] == ROCK){ textureID = 1; } // roccia
+				else if(c->Map[x][y][z] == WATER){ textureID = 207; } // acqua
+				else if(c->Map[x][y][z] == SNOW){ textureID = 66; } // neve
+				else if(c->Map[x][y][z] == BADROCK){ textureID = 17; } // badrock
+				else if(c->Map[x][y][z] == LEAF){ textureID = 52; } // foglie
+				else if(c->Map[x][y][z] == LOG){ textureID = 20; } // tronco
+                		
 				//Upper Face
                 if(GetBlockGlobal(world, globalX, y+1, globalZ) == 0){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
@@ -386,6 +452,19 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
     c -> model = LoadModelFromMesh(ChunkMesh);               
 }
 
+void UpdateChunkGraph(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int cx, int cz, Texture2D fnTerrain) {
+    int wx = (cx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+    int wz = (cz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+
+    if (world[wx][wz].gridX == cx && world[wx][wz].gridZ == cz) {
+        if (world[wx][wz].model.meshCount > 0) {
+            UnloadModel(world[wx][wz].model);
+        }
+        BuildChunkMesh(world, &world[wx][wz], cx, cz);
+        world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+    }
+}
+
 void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerPosition, int *lastChunkPlayerX, int *lastChunkPlayerZ, Texture2D fnTerrain){
 		int chunkPlayerX = (int) floorf(playerPosition.x / CHUNK_SIZE); 
 		int chunkPlayerZ = (int) floorf(playerPosition.z / CHUNK_SIZE); 
@@ -397,12 +476,11 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
                     int gx = chunkPlayerX + dx;
                     int gz = chunkPlayerZ + dz;
                     
-                    // Calcoliamo in quale slot dell'array DOVREBBE trovarsi questo chunk
                     int wx = (gx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
                     int wz = (gz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
                     
                     // Se lo slot non contiene le coordinate corrette, significa che c'è
-                    // un vecchio chunk ormai lontano. Lo sovrascriviamo!
+                    // un vecchio chunk ormai lontano
                     if (world[wx][wz].gridX != gx || world[wx][wz].gridZ != gz) {
                         if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
                         world[wx][wz].model = (Model){0};
@@ -416,6 +494,11 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
                         genQueueWX[genTail] = wx;
                         genQueueWZ[genTail] = wz;
                         genTail = (genTail + 1) % GEN_QUEUE_SIZE;
+						
+						/*UpdateChunkGraph(world, gx + 1, gz, fnTerrain); // Destra
+						UpdateChunkGraph(world, gx - 1, gz, fnTerrain); // Sinistra
+						UpdateChunkGraph(world, gx, gz + 1, fnTerrain); // Avanti
+						UpdateChunkGraph(world, gx, gz - 1, fnTerrain); // Indietro*/
                     }
                 }
             }
@@ -432,19 +515,6 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
     		BuildChunkMesh(world, &world[wx][wz], gx, gz);
     		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
 		}
-}
-
-void UpdateChunkGraph(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int cx, int cz, Texture2D fnTerrain) {
-    int wx = (cx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-    int wz = (cz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-
-    if (world[wx][wz].gridX == cx && world[wx][wz].gridZ == cz) {
-        if (world[wx][wz].model.meshCount > 0) {
-            UnloadModel(world[wx][wz].model);
-        }
-        BuildChunkMesh(world, &world[wx][wz], cx, cz);
-        world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-    }
 }
 
 void InizializeWorld(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int chunkPlayerX, int chunkPlayerZ, Texture2D fnTerrain){
@@ -488,13 +558,9 @@ int main(){
                        CAMERA_PERSPECTIVE};
     
 	//RAY COLLISION
-	Vector3 dist = Vector3Subtract(camera.target, camera.position);
-	Vector3 lookDir = Vector3Normalize(dist);
+	Vector3 dist;// = Vector3Subtract(camera.target, camera.position);
+	Vector3 lookDir;// = Vector3Normalize(dist);
 	Vector3 ray = camera.position;
-	
-    //PLAYER
-    static BoundingBox BoxPlayer;
-    static BoundingBox BoxCollisionPlayer;
     
     int chunkPlayerX = (int) floorf(camera.position.x / CHUNK_SIZE); 
     int chunkPlayerZ = (int) floorf(camera.position.z / CHUNK_SIZE); 
@@ -503,12 +569,14 @@ int main(){
     int lastChunkPlayerZ = chunkPlayerZ;
     
     // Build Initialize World 
-    static Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
-    InizializeWorld(world, chunkPlayerX, chunkPlayerZ, fnTerrain);
+    //Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
+	Game game;
+	InizializeWorld(game.world, chunkPlayerX, chunkPlayerZ, fnTerrain);
 
-    SetTargetFPS(240); 
+    SetTargetFPS(540); 
     DisableCursor();
 	SetMouseCursor(MOUSE_CURSOR_CROSSHAIR);
+	char textCordinates[128];
     float dt; Vector3 velocityPlayer = {0};
     while(!WindowShouldClose())
     {
@@ -518,10 +586,9 @@ int main(){
 		camera.position.y += velocityPlayer.y * dt;
 		//CAMERA
         UpdateCamera(&camera, CAMERA_FREE);
-        BoxPlayer.min =  (Vector3){ camera.position.x - 0.5f, camera.position.y - 2.0f, camera.position.z - 0.5f };
-		BoxPlayer.max =  (Vector3){ camera.position.x + 0.5f, camera.position.y - 0.15f, camera.position.z + 0.5f };
+		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f", camera.position.x, camera.position.y, camera.position.z);
 		
-		BuildChunk(world, camera.position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
+		BuildChunk(game.world, camera.position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
 
 		if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
 			dist = Vector3Subtract(camera.target, camera.position);
@@ -537,7 +604,7 @@ int main(){
 				int gy = (int)floorf(ray.y);
 				int gz = (int)floorf(ray.z);
 				
-				if(GetBlockGlobal(world, gx, gy, gz) != 0){ // I hit it
+				if(GetBlockGlobal(game.world, gx, gy, gz) != 0){ // I hit it
 					int chunkX = (int)floorf((float)gx / CHUNK_SIZE);
 					int chunkZ = (int)floorf((float)gz / CHUNK_SIZE);
 					int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -546,12 +613,12 @@ int main(){
 					int lx = (gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					int lz = (gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					
-					world[wx][wz].Map[lx][gy][lz] = 0;
-					UpdateChunkGraph(world, chunkX, chunkZ, fnTerrain);
-					if (lx == 0) { UpdateChunkGraph(world, chunkX - 1, chunkZ, fnTerrain);}
-					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(world, chunkX + 1, chunkZ, fnTerrain);}
-					if (lz == 0) { UpdateChunkGraph(world, chunkX, chunkZ - 1, fnTerrain);}
-					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(world, chunkX, chunkZ + 1, fnTerrain);}
+					game.world[wx][wz].Map[lx][gy][lz] = 0;
+					UpdateChunkGraph(game.world, chunkX, chunkZ, fnTerrain);
+					if (lx == 0) { UpdateChunkGraph(game.world, chunkX - 1, chunkZ, fnTerrain);}
+					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX + 1, chunkZ, fnTerrain);}
+					if (lz == 0) { UpdateChunkGraph(game.world, chunkX, chunkZ - 1, fnTerrain);}
+					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX, chunkZ + 1, fnTerrain);}
 					
 					break;
 				}
@@ -575,7 +642,7 @@ int main(){
 				int gy = (int)floorf(ray.y);
 				int gz = (int)floorf(ray.z);
 				
-				if(GetBlockGlobal(world, gx, gy, gz) != 0){ // I hit it
+				if(GetBlockGlobal(game.world, gx, gy, gz) != 0){ // I hit it
 					int chunkX = (int)floorf((float)prec_gx / CHUNK_SIZE);
 					int chunkZ = (int)floorf((float)prec_gz / CHUNK_SIZE);
 					int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -584,12 +651,12 @@ int main(){
 					int lx = (prec_gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					int lz = (prec_gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 					
-					world[wx][wz].Map[lx][prec_gy][lz] = 1;
-					UpdateChunkGraph(world, chunkX, chunkZ, fnTerrain);
-					if (lx == 0) { UpdateChunkGraph(world, chunkX - 1, chunkZ, fnTerrain);}
-					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(world, chunkX + 1, chunkZ, fnTerrain);}
-					if (lz == 0) { UpdateChunkGraph(world, chunkX, chunkZ - 1, fnTerrain);}
-					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(world, chunkX, chunkZ + 1, fnTerrain);}
+					game.world[wx][wz].Map[lx][prec_gy][lz] = 1;
+					UpdateChunkGraph(game.world, chunkX, chunkZ, fnTerrain);
+					if (lx == 0) { UpdateChunkGraph(game.world, chunkX - 1, chunkZ, fnTerrain);}
+					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX + 1, chunkZ, fnTerrain);}
+					if (lz == 0) { UpdateChunkGraph(game.world, chunkX, chunkZ - 1, fnTerrain);}
+					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game.world, chunkX, chunkZ + 1, fnTerrain);}
 					
 					break;
 				}
@@ -601,25 +668,25 @@ int main(){
 
         BeginDrawing();
             ClearBackground(SKYBLUE);
-            DrawFPS(10, 10);
 			
             BeginMode3D(camera);
               	//DrawBoundingBox(BoxPlayer, RED);
             	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-            			DrawModel(world[wx][wz].model, world[wx][wz].position, 1.0f, WHITE);
+            			DrawModel(game.world[wx][wz].model, game.world[wx][wz].position, 1.0f, WHITE);
         			}
     			}   
             EndMode3D();
 			
+			DrawFPS(10, 10);
+			DrawText(textCordinates, 10, 30, 20, WHITE);
 			DrawGUI(gui);
-			
 			
         EndDrawing();
     }
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-      		UnloadModel(world[wx][wz].model);
+      		UnloadModel(game.world[wx][wz].model);
      	}
     }  
     UnloadTexture(fnTerrain);
