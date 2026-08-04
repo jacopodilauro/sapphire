@@ -27,7 +27,7 @@
 
 #define HEIGHT_GROUND 110
 
-#define LOCAL_WORLD_SIZE 15
+#define LOCAL_WORLD_SIZE 7
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
 #define MAX_RAY_DISTANCE 6
@@ -35,9 +35,12 @@
 
 #define GEN_QUEUE_SIZE 64
 
+#define MAX_CHUNK_FACES (CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6)
+
+
 int HEIGHTGROUND;
 int WATER_LEVEL;
-// Generation Queue
+// Mesh Generation Queue
 int genQueueGX[GEN_QUEUE_SIZE];   
 int genQueueGZ[GEN_QUEUE_SIZE];   
 int genQueueWX[GEN_QUEUE_SIZE];   
@@ -45,6 +48,13 @@ int genQueueWZ[GEN_QUEUE_SIZE];
 int genHead = 0;
 int genTail = 0;
 
+// Data Generation Queue
+int dataQueueGX[GEN_QUEUE_SIZE];   
+int dataQueueGZ[GEN_QUEUE_SIZE];   
+int dataQueueWX[GEN_QUEUE_SIZE];   
+int dataQueueWZ[GEN_QUEUE_SIZE];
+int dataHead = 0;
+int dataTail = 0;
 typedef struct Chunk{
     int gridX;
     int gridZ;
@@ -56,6 +66,12 @@ typedef struct Chunk{
 typedef struct Game{
 	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
 }Game;
+
+typedef struct Player{
+	Camera3D camera;
+	Vector3 lookDir;
+	Vector3 ray;
+}Player;
 
 enum BlockType {
 	AIR 	= 0,
@@ -210,8 +226,8 @@ void BuildTree(Chunk *c, int x, int y, int z){
 char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int gy, int gz){
     if(gy < 0 || gy >= CHUNK_HEIGTH) return 0;
 	
-	int chunkX = (int) floor((float)gx / CHUNK_SIZE);
-	int chunkZ = (int) floor((float)gz / CHUNK_SIZE);
+	int chunkX = gx >> 4; // Sarebbe come dividere per 16, anche per numeri negativi
+	int chunkZ = gz >> 4;
 	
 	int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
     int wz = (chunkZ % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -220,8 +236,8 @@ char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int
         return 0; 
     }
 	
-	int lx = (gx % CHUNK_SIZE  + CHUNK_SIZE) % CHUNK_SIZE;
-    int lz = (gz % CHUNK_SIZE  + CHUNK_SIZE) % CHUNK_SIZE;
+	int lx = gx & 15; // Identico a %16 anche con negativi 
+    int lz = gz & 15;
 	
 	return world[wx][wz].Map[lx][gy][lz];
 }
@@ -282,7 +298,7 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
 
             if (HEIGHTGROUND <= WATER_LEVEL) {
                 for (int y = HEIGHTGROUND; y <= WATER_LEVEL; y++) {
-                    c->Map[x][y][z] = 5;
+                    c->Map[x][y][z] = WATER;
                 }
             }
         }    
@@ -290,11 +306,12 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
 }
 
 void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, int gX, int gZ){
-    //Algoritmo Mesh optimizated, I use only visible faces
+        //Algoritmo Mesh optimizated, I use only visible faces
     int MAX_FACES = CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6;
     float *vertici = (float*)malloc(MAX_FACES * 4 * 3 * sizeof(float));
     unsigned short *indici = (unsigned short*)malloc(MAX_FACES * 6 * sizeof(unsigned short));
     float *texcoords = (float*)malloc(MAX_FACES * 4 * 2 * sizeof(float));
+    
     
     int vCount = 0;
     int iCount = 0;
@@ -323,7 +340,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
 				else if(c->Map[x][y][z] == LOG){ textureID = 20; } // tronco
                 		
 				//Upper Face
-                if(GetBlockGlobal(world, globalX, y+1, globalZ) == 0){
+                if(y == CHUNK_HEIGTH - 1 || c->Map[x][y+1][z] == 0){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 1.0f;
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f;
@@ -346,7 +363,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     iCount += 6;
                 }
                 //Under Face                
-                if(y == 0 || GetBlockGlobal(world, globalX, y-1, globalZ) == 0){
+                if(y == 0 || c->Map[x][y+1][z] == 0){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -369,7 +386,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     iCount += 6;
                 }                
                 //DX Face ->
-                if(GetBlockGlobal(world, globalX + 1, y, globalZ) == 0){
+                if(x == CHUNK_SIZE - 1 ? GetBlockGlobal(world, globalX + 1, y, globalZ) == 0 : c->Map[x + 1][y][z] == 0){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; // Top-Left
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; // Bottom-Left
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; // Top-Right
@@ -386,7 +403,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //SX Face <-
-                if(GetBlockGlobal(world, globalX-1, y, globalZ) == 0){
+                if(x == 0 ? GetBlockGlobal(world, globalX - 1, y, globalZ) == 0 : c->Map[x - 1][y][z] == 0){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -403,7 +420,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //BACK Face
-                if(GetBlockGlobal(world, globalX, y, globalZ+1) == 0){
+                if(z == CHUNK_SIZE - 1 ? GetBlockGlobal(world, globalX, y, globalZ + 1) == 0 : c->Map[x][y][z + 1] == 0){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; 
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; 
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f; 
@@ -420,7 +437,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //FRONT Face
-                if(GetBlockGlobal(world, globalX, y, globalZ-1) == 0){
+                if(z == 0 ? GetBlockGlobal(world, globalX, y, globalZ - 1) == 0 : c->Map[x][y][z - 1] == 0){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f; 
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f; 
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; 
@@ -451,7 +468,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
     UploadMesh(&ChunkMesh, false);
     
     //MODEL    
-    c -> model = LoadModelFromMesh(ChunkMesh);               
+    c -> model = LoadModelFromMesh(ChunkMesh);              
 }
 
 void UpdateChunkGraph(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int cx, int cz, Texture2D fnTerrain) {
@@ -487,26 +504,34 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
                         if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
                         world[wx][wz].model = (Model){0};
                         
-                        // Generiamo i DATI all'istante, fuori dalla coda, così i chunk vicini li vedono subito!
-						BuildChunkData(&world[wx][wz], gx, gz);
-
-                        // Mettiamo in coda la generazione
-                        genQueueGX[genTail] = gx;
-                        genQueueGZ[genTail] = gz;
-                        genQueueWX[genTail] = wx;
-                        genQueueWZ[genTail] = wz;
-                        genTail = (genTail + 1) % GEN_QUEUE_SIZE;
+						dataQueueGX[dataTail] = gx;
+						dataQueueGZ[dataTail] = gz;
+						dataQueueWX[dataTail] = wx;
+						dataQueueWZ[dataTail] = wz;
+						dataTail = (dataTail + 1) % GEN_QUEUE_SIZE;
 						
-						/*UpdateChunkGraph(world, gx + 1, gz, fnTerrain); // Destra
-						UpdateChunkGraph(world, gx - 1, gz, fnTerrain); // Sinistra
-						UpdateChunkGraph(world, gx, gz + 1, fnTerrain); // Avanti
-						UpdateChunkGraph(world, gx, gz - 1, fnTerrain); // Indietro*/
                     }
                 }
             }
             *lastChunkPlayerX = chunkPlayerX;
             *lastChunkPlayerZ = chunkPlayerZ;
         }
+		
+		if (dataHead != dataTail) {
+			int wx = dataQueueWX[dataHead];
+			int wz = dataQueueWZ[dataHead];
+			int gx = dataQueueGX[dataHead];
+			int gz = dataQueueGZ[dataHead];
+			dataHead = (dataHead + 1) % GEN_QUEUE_SIZE;
+			
+			BuildChunkData(&world[wx][wz], gx, gz);
+
+			genQueueGX[genTail] = gx;
+			genQueueGZ[genTail] = gz;
+			genQueueWX[genTail] = wx;
+			genQueueWZ[genTail] = wz;
+			genTail = (genTail + 1) % GEN_QUEUE_SIZE;
+		}
 		
 		if (genHead != genTail) {
  			int wx = genQueueWX[genHead];
@@ -545,138 +570,158 @@ void InizializeWorld(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int chunkP
     }
 }
 
+void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
+	player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
+	player->ray = player->camera.position;
+	
+	for(float i = 0.0; i < MAX_RAY_DISTANCE; i+= STEP_RAY_SIZE){
+		player->ray.x += player->lookDir.x * STEP_RAY_SIZE;
+		player->ray.y += player->lookDir.y * STEP_RAY_SIZE;
+		player->ray.z += player->lookDir.z * STEP_RAY_SIZE;
+		
+		int gx = (int)floorf(player->ray.x);
+		int gy = (int)floorf(player->ray.y);
+		int gz = (int)floorf(player->ray.z);
+		
+		if(GetBlockGlobal(game->world, gx, gy, gz) != 0){ // I hit it
+			int chunkX = (int)floorf((float)gx / CHUNK_SIZE);
+			int chunkZ = (int)floorf((float)gz / CHUNK_SIZE);
+			int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+			int wz = (chunkZ % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+
+			int lx = (gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+			int lz = (gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+			
+			game->world[wx][wz].Map[lx][gy][lz] = 0;
+			UpdateChunkGraph(game->world, chunkX, chunkZ, fnTerrain);
+			if (lx == 0) { UpdateChunkGraph(game->world, chunkX - 1, chunkZ, fnTerrain);}
+			else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game->world, chunkX + 1, chunkZ, fnTerrain);}
+			if (lz == 0) { UpdateChunkGraph(game->world, chunkX, chunkZ - 1, fnTerrain);}
+			else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game->world, chunkX, chunkZ + 1, fnTerrain);}
+			
+			break;
+		}
+	}
+}
+
+void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
+	player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
+	player->ray = player->camera.position;
+	
+	int prec_gx = (int)floorf(player->ray.x);
+	int prec_gy = (int)floorf(player->ray.y);
+	int prec_gz = (int)floorf(player->ray.z);
+	
+	for(float i = 0.0; i < MAX_RAY_DISTANCE; i+= STEP_RAY_SIZE){
+		player->ray.x += player->lookDir.x * STEP_RAY_SIZE;
+		player->ray.y += player->lookDir.y * STEP_RAY_SIZE;
+		player->ray.z += player->lookDir.z * STEP_RAY_SIZE;
+		
+		int gx = (int)floorf(player->ray.x);
+		int gy = (int)floorf(player->ray.y);
+		int gz = (int)floorf(player->ray.z);
+		
+		if(GetBlockGlobal(game->world, gx, gy, gz) != 0){ // I hit it
+			int chunkX = (int)floorf((float)prec_gx / CHUNK_SIZE);
+			int chunkZ = (int)floorf((float)prec_gz / CHUNK_SIZE);
+			int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+			int wz = (chunkZ % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+
+			int lx = (prec_gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+			int lz = (prec_gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+			
+			game->world[wx][wz].Map[lx][prec_gy][lz] = 1;
+			UpdateChunkGraph(game->world, chunkX, chunkZ, fnTerrain);
+			if (lx == 0) { UpdateChunkGraph(game->world, chunkX - 1, chunkZ, fnTerrain);}
+			else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game->world, chunkX + 1, chunkZ, fnTerrain);}
+			if (lz == 0) { UpdateChunkGraph(game->world, chunkX, chunkZ - 1, fnTerrain);}
+			else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game->world, chunkX, chunkZ + 1, fnTerrain);}
+			
+			break;
+		}
+		prec_gx = gx;
+		prec_gy = gy;
+		prec_gz = gz;
+	}
+}
+
+int IsInRange(Player *player, Game *game, int wx, int wz){
+	if (game->world[wx][wz].model.meshCount == 0) return 0;
+
+	Vector3 chunkCenter = { game->world[wx][wz].position.x + (CHUNK_SIZE / 2.0f),
+							player->camera.position.y,
+							game->world[wx][wz].position.z + (CHUNK_SIZE / 2.0f)
+						};
+	Vector3 dirToChunk = Vector3Subtract(chunkCenter, player->camera.position);
+	float dist = Vector3Length(dirToChunk);
+	if(dist < (CHUNK_SIZE * 2.0f)) return 1;
+	
+	dirToChunk = Vector3Normalize(dirToChunk);
+	if(Vector3DotProduct(player->lookDir, dirToChunk) > - 0.3f) {return 1;}
+	
+	return 0;
+}
+
 int main(){
     
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
-    Texture2D fnTerrain = LoadTexture("terrain.png");
+    Texture2D fnTerrain = LoadTexture("atlas_terrain.png");
     SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
-	Texture2D gui = LoadTexture("gui.png");
+	Texture2D gui = LoadTexture("atlas_gui.png");
     
     //CAMERA
-    Camera3D camera = {10.0f, 230.0f, -10.0f, 
+	Player *player = (Player*)malloc(sizeof(Player));
+	Camera3D *camera = &player->camera;
+    *camera = (Camera3D){10.0f, 50.0f, -10.0f, 
                        9.0f, 3.0f, 0.0f,
                        0.0f, 1.0f, 0.0f,
                        60.0f,
                        CAMERA_PERSPECTIVE};
-    
-	//RAY COLLISION
-	Vector3 dist;
-	Vector3 lookDir;
-	Vector3 ray = camera.position;
-    
-    int chunkPlayerX = (int) floorf(camera.position.x / CHUNK_SIZE); 
-    int chunkPlayerZ = (int) floorf(camera.position.z / CHUNK_SIZE); 
+	
+    int chunkPlayerX = (int) floorf(camera->position.x / CHUNK_SIZE); 
+    int chunkPlayerZ = (int) floorf(camera->position.z / CHUNK_SIZE); 
 
     int lastChunkPlayerX = chunkPlayerX;
     int lastChunkPlayerZ = chunkPlayerZ;
     
     // Build Initialize World 
-    //Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
 	Game *game = (Game*)malloc(sizeof(Game));
-	InizializeWorld(game -> world, chunkPlayerX, chunkPlayerZ, fnTerrain);
+	InizializeWorld(game->world, chunkPlayerX, chunkPlayerZ, fnTerrain);
 
     SetTargetFPS(540); 
     DisableCursor();
-	SetMouseCursor(MOUSE_CURSOR_CROSSHAIR);
 	char textCordinates[128];
     float dt; Vector3 velocityPlayer = {0};
-    while(!WindowShouldClose())
-    {
+    while(!WindowShouldClose()){
 		//GRAVITY
 		dt = GetFrameTime();
 		velocityPlayer.y -= GRAVITY * dt;
-		camera.position.y += velocityPlayer.y * dt;
+		camera->position.y += velocityPlayer.y * dt;
 		//CAMERA
-        UpdateCamera(&camera, CAMERA_FREE);
-		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f", camera.position.x, camera.position.y, camera.position.z);
+        UpdateCamera(camera, CAMERA_FREE);
+		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f", camera->position.x, camera->position.y, camera->position.z);
+		player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
+
 		
-		BuildChunk(game -> world, camera.position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
+		BuildChunk(game->world, camera->position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
 
 		if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
-			dist = Vector3Subtract(camera.target, camera.position);
-			lookDir = Vector3Normalize(dist);
-			ray = camera.position;
-			
-			for(float i = 0.0; i < MAX_RAY_DISTANCE; i+= STEP_RAY_SIZE){
-				ray.x += lookDir.x * STEP_RAY_SIZE;
-				ray.y += lookDir.y * STEP_RAY_SIZE;
-				ray.z += lookDir.z * STEP_RAY_SIZE;
-				
-				int gx = (int)floorf(ray.x);
-				int gy = (int)floorf(ray.y);
-				int gz = (int)floorf(ray.z);
-				
-				if(GetBlockGlobal(game -> world, gx, gy, gz) != 0){ // I hit it
-					int chunkX = (int)floorf((float)gx / CHUNK_SIZE);
-					int chunkZ = (int)floorf((float)gz / CHUNK_SIZE);
-					int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-					int wz = (chunkZ % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-
-					int lx = (gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-					int lz = (gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-					
-					game -> world[wx][wz].Map[lx][gy][lz] = 0;
-					UpdateChunkGraph(game -> world, chunkX, chunkZ, fnTerrain);
-					if (lx == 0) { UpdateChunkGraph(game -> world, chunkX - 1, chunkZ, fnTerrain);}
-					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX + 1, chunkZ, fnTerrain);}
-					if (lz == 0) { UpdateChunkGraph(game -> world, chunkX, chunkZ - 1, fnTerrain);}
-					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX, chunkZ + 1, fnTerrain);}
-					
-					break;
-				}
-			}
+			DeleteBlockRay(player, game, fnTerrain);
 		}
 		if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)){
-			dist = Vector3Subtract(camera.target, camera.position);
-			lookDir = Vector3Normalize(dist);
-			ray = camera.position;
-			
-			int prec_gx = (int)floorf(ray.x);
-			int prec_gy = (int)floorf(ray.y);
-			int prec_gz = (int)floorf(ray.z);
-			
-			for(float i = 0.0; i < MAX_RAY_DISTANCE; i+= STEP_RAY_SIZE){
-				ray.x += lookDir.x * STEP_RAY_SIZE;
-				ray.y += lookDir.y * STEP_RAY_SIZE;
-				ray.z += lookDir.z * STEP_RAY_SIZE;
-				
-				int gx = (int)floorf(ray.x);
-				int gy = (int)floorf(ray.y);
-				int gz = (int)floorf(ray.z);
-				
-				if(GetBlockGlobal(game -> world, gx, gy, gz) != 0){ // I hit it
-					int chunkX = (int)floorf((float)prec_gx / CHUNK_SIZE);
-					int chunkZ = (int)floorf((float)prec_gz / CHUNK_SIZE);
-					int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-					int wz = (chunkZ % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-
-					int lx = (prec_gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-					int lz = (prec_gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-					
-					game -> world[wx][wz].Map[lx][prec_gy][lz] = 1;
-					UpdateChunkGraph(game -> world, chunkX, chunkZ, fnTerrain);
-					if (lx == 0) { UpdateChunkGraph(game -> world, chunkX - 1, chunkZ, fnTerrain);}
-					else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX + 1, chunkZ, fnTerrain);}
-					if (lz == 0) { UpdateChunkGraph(game -> world, chunkX, chunkZ - 1, fnTerrain);}
-					else if (lz == CHUNK_SIZE - 1) { UpdateChunkGraph(game -> world, chunkX, chunkZ + 1, fnTerrain);}
-					
-					break;
-				}
-				prec_gx = gx;
-				prec_gy = gy;
-				prec_gz = gz;
-			}
+			PlaceBlockRay(player, game, fnTerrain);
 		}
 
         BeginDrawing();
             ClearBackground(SKYBLUE);
 			
-            BeginMode3D(camera);
-              	//DrawBoundingBox(BoxPlayer, RED);
+            BeginMode3D(*camera);
             	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-            			DrawModel(game -> world[wx][wz].model, game -> world[wx][wz].position, 1.0f, WHITE);
-        			}
+						if(IsInRange(player, game, wx, wz)){
+							DrawModel(game->world[wx][wz].model, game->world[wx][wz].position, 1.0f, WHITE);
+						}
+					}
     			}   
             EndMode3D();
 			
@@ -688,11 +733,13 @@ int main(){
     }
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-      		UnloadModel(game -> world[wx][wz].model);
+      		UnloadModel(game->world[wx][wz].model);
      	}
     }  
     UnloadTexture(fnTerrain);
     CloseWindow(); 
-
+	
+	free(player);
+	free(game);
     return 0;
 }
