@@ -16,6 +16,7 @@
 #include <math.h>
 #include <string.h>
 #include <raymath.h>
+#include <stdbool.h>
 
 #define WIDTH 1800
 #define HEIGHT 1200
@@ -55,12 +56,19 @@ int dataQueueWX[GEN_QUEUE_SIZE];
 int dataQueueWZ[GEN_QUEUE_SIZE];
 int dataHead = 0;
 int dataTail = 0;
+
+// calculus for global generation
+float temp_vertici[MAX_CHUNK_FACES * 4 * 3];
+unsigned short temp_indici[MAX_CHUNK_FACES * 6];
+float temp_texcoords[MAX_CHUNK_FACES * 4 * 2];
+
 typedef struct Chunk{
     int gridX;
     int gridZ;
     char Map[CHUNK_SIZE][CHUNK_HEIGTH][CHUNK_SIZE];
     Model model;
     Vector3 position;
+	bool needRemesh;
 }Chunk; 
 
 typedef struct Game{
@@ -306,13 +314,11 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
 }
 
 void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, int gX, int gZ){
-        //Algoritmo Mesh optimizated, I use only visible faces
-    int MAX_FACES = CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6;
-    float *vertici = (float*)malloc(MAX_FACES * 4 * 3 * sizeof(float));
-    unsigned short *indici = (unsigned short*)malloc(MAX_FACES * 6 * sizeof(unsigned short));
-    float *texcoords = (float*)malloc(MAX_FACES * 4 * 2 * sizeof(float));
-    
-    
+
+	float *vertici = temp_vertici;
+	unsigned short *indici = temp_indici;
+	float *texcoords = temp_texcoords;
+        
     int vCount = 0;
     int iCount = 0;
     int tCount = 0;
@@ -363,7 +369,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     iCount += 6;
                 }
                 //Under Face                
-                if(y == 0 || c->Map[x][y+1][z] == 0){
+                if(y == 0 || c->Map[x][y-1][z] == 0){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -462,9 +468,15 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
     ptrMesh -> vertexCount = vCount;
     ptrMesh -> triangleCount = iCount / 3;
     
-    ptrMesh -> vertices = (float*)realloc(vertici, vCount * 3 * sizeof(float));
-    ptrMesh -> indices = (unsigned short*)realloc(indici, iCount * sizeof(unsigned short));
-    ptrMesh -> texcoords = (float*)realloc(texcoords, tCount * sizeof(float));
+	// Allocate only necessary memory for this psecific chunk mesh
+	ptrMesh->vertices = (float*)malloc(vCount * 3 * sizeof(float));
+    ptrMesh->indices = (unsigned short*)malloc(iCount * sizeof(unsigned short));
+    ptrMesh->texcoords = (float*)malloc(tCount * sizeof(float));
+    
+    // Copy form buffer -> allocated memory
+    memcpy(ptrMesh->vertices, vertici, vCount * 3 * sizeof(float));
+    memcpy(ptrMesh->indices, indici, iCount * sizeof(unsigned short));
+    memcpy(ptrMesh->texcoords, texcoords, tCount * sizeof(float));
     UploadMesh(&ChunkMesh, false);
     
     //MODEL    
@@ -503,6 +515,7 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
                     if (world[wx][wz].gridX != gx || world[wx][wz].gridZ != gz) {
                         if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
                         world[wx][wz].model = (Model){0};
+						world[wx][wz].needRemesh = false;
                         
 						dataQueueGX[dataTail] = gx;
 						dataQueueGZ[dataTail] = gz;
@@ -517,7 +530,10 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
             *lastChunkPlayerZ = chunkPlayerZ;
         }
 		
-		if (dataHead != dataTail) {
+		/*
+		 * I switch if -> while bc daa is fast and I wanna 
+		*/
+		while (dataHead != dataTail) {
 			int wx = dataQueueWX[dataHead];
 			int wz = dataQueueWZ[dataHead];
 			int gx = dataQueueGX[dataHead];
@@ -531,6 +547,25 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 			genQueueWX[genTail] = wx;
 			genQueueWZ[genTail] = wz;
 			genTail = (genTail + 1) % GEN_QUEUE_SIZE;
+			
+			/*
+			 * nborX and nborZ are used for help me to find the 4 neighbor of an chunk
+			 * ngx and ngz are the global X,Z coordinate of the neighbor 
+		     * nwx and nwz are the local one
+			 * nb the neighbor
+			*/
+			int nborX[4] = {1, -1, 0, 0};
+			int nborZ[4] = {0, 0, 1, -1};
+			for (int n = 0; n < 4; n++) {
+				int ngx = gx + nborX[n];
+				int ngz = gz + nborZ[n];
+				int nwx = (ngx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+				int nwz = (ngz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+				Chunk *nb = &world[nwx][nwz];
+				if (nb->gridX == ngx && nb->gridZ == ngz && nb->model.meshCount > 0) {
+					nb->needRemesh = true;
+				}
+			}
 		}
 		
 		if (genHead != genTail) {
@@ -541,7 +576,18 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
     		genHead = (genHead + 1) % GEN_QUEUE_SIZE;
     		BuildChunkMesh(world, &world[wx][wz], gx, gz);
     		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-		}
+		} /*else {*/
+			
+for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
+    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
+        if (world[wx][wz].needRemesh) {
+            UnloadModel(world[wx][wz].model);
+            BuildChunkMesh(world, &world[wx][wz], world[wx][wz].gridX, world[wx][wz].gridZ);
+            world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+            world[wx][wz].needRemesh = false;
+        }
+    }
+}
 }
 
 void InizializeWorld(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int chunkPlayerX, int chunkPlayerZ, Texture2D fnTerrain){
@@ -583,7 +629,7 @@ void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 		int gy = (int)floorf(player->ray.y);
 		int gz = (int)floorf(player->ray.z);
 		
-		if(GetBlockGlobal(game->world, gx, gy, gz) != 0){ // I hit it
+		if(GetBlockGlobal(game->world, gx, gy, gz) != 0){ // hit
 			int chunkX = (int)floorf((float)gx / CHUNK_SIZE);
 			int chunkZ = (int)floorf((float)gz / CHUNK_SIZE);
 			int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
