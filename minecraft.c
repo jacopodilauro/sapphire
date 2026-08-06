@@ -1,13 +1,12 @@
-/*
- [x] prossimo punto da fare è la gravità, come avevo fatto tempo fa
- [x] inseriamo il volo
- [x] inseriamo il piazzamento e togliemento blocchi
- [] ottimizzare la generazione chunk
- [] poter selzionare blocchi da piazzare
- [] inserisco poi le colisioni 3D
- [] inseirsco il salto
- [] inseriamo il sole, alberi, montagne
- [] inseriamo la terza persona e prima persona. 
+/*								
+ [x] inseriamo il volo																	|
+ [x] inseriamo il piazzamento e togliemento blocchi										|
+ [x] ottimizzare la generazione chunk													|05/08/26 <note: da fare con i threads>
+ [] poter selzionare blocchi da piazzare												|
+ [] inserisco poi le colisioni 3D														|
+ [] gravità e il salto	 																|
+ [] inseriamo il sole, alberi, montagne													|
+ [] inseriamo la terza persona e prima persona. 										|
 */
 
 #include <raylib.h>
@@ -18,10 +17,17 @@
 #include <raymath.h>
 #include <stdbool.h>
 
+#define XPGREEN CLITERAL(Color){ 128, 255, 32, 255 } // XP Green
+
 #define WIDTH 1800
 #define HEIGHT 1200
 
 #define GRAVITY 0
+
+// GUI
+#define GUI_SCALE 5
+#define ITEM_BAR_SIZE 9
+#define FONT_SIZE 20
 
 #define CHUNK_SIZE 16
 #define CHUNK_HEIGTH 128
@@ -79,7 +85,38 @@ typedef struct Player{
 	Camera3D camera;
 	Vector3 lookDir;
 	Vector3 ray;
+	
+	// Bit field
+	unsigned int xp : 7; 
+	
+	unsigned int hungry : 5;
+	unsigned int heal : 5;
+	unsigned int xpBar : 5;
+	int selectedSlotItemBar : 5;
+	
+	unsigned int isInWater : 1;
+	unsigned int isTakingDamage : 1;
+	
 }Player;
+
+typedef struct CustomCamera{
+	Camera3D *camera;
+	Vector3 position; 
+	float yaw; // orizzontale
+	float pitch; // verticale
+	float speed; 
+	float ds; // sensibilità
+}CustomCamera;
+
+void InitPlayer(struct Player *p){
+    p->xp = 4;
+    p->hungry = 20;
+    p->heal = 20;
+    p->xpBar = 0;
+    p->selectedSlotItemBar = 0;
+    p->isInWater = 1;
+    p->isTakingDamage = 0;
+}
 
 enum BlockType {
 	AIR 	= 0,
@@ -98,11 +135,172 @@ int IsTransparent(int blockID) {
     return (blockID == AIR || blockID == WATER || blockID == LEAF);
 }
 
-void DrawGUI(Texture2D gui){
+void DrawGUI(Texture2D gui, Texture2D ascii, Player *player){
+	// Draw central cross 
+	Rectangle rec_cross = {617.0f, 480.0f, 9.0f, 9.0f};
+	Rectangle pos_cross = {WIDTH/2 - (4.5 * GUI_SCALE), HEIGHT/2 - (4.5 * GUI_SCALE), 9.0f * GUI_SCALE, 9.0f * GUI_SCALE};
+	DrawTexturePro(gui, rec_cross, pos_cross, (Vector2) {0}, 0.0f, WHITE);
 	
-	Rectangle rec = {617.0f, 480.0f, 9.0f, 9.0f};
-	Rectangle posGUI = {WIDTH/2, HEIGHT/2, 20.0f, 20.0f};
-	DrawTexturePro(gui, rec, posGUI, (Vector2) {10, 10}, 0.0f, WHITE);
+	// Draw item bar
+	Rectangle rec_item_bar = {72.0f, 457.0f, 182.0f, 22.0f};
+	Rectangle pos_item_bar = {WIDTH/2 - (91 * GUI_SCALE), HEIGHT - (23*GUI_SCALE), 182.0f * GUI_SCALE, 22.0f * GUI_SCALE};
+	DrawTexturePro(gui, rec_item_bar, pos_item_bar, (Vector2) {0}, 0.0f, WHITE);
+	// Draw item square GetMouseWheelMove
+	Rectangle rec_item_box = {48.0f, 457.0f, 24.0f, 24.0f};
+	Rectangle pos_item_box = {WIDTH/2 - ((92 - (player->selectedSlotItemBar * 20)) * GUI_SCALE), HEIGHT - (24*GUI_SCALE), 24.0f * GUI_SCALE, 24.0f * GUI_SCALE};
+	DrawTexturePro(gui, rec_item_box, pos_item_box, (Vector2) {0}, 0.0f, WHITE);
+	
+	
+	// Draw experience bar
+	Rectangle rec_exp_bar = {822.0f, 110.0f, 182.0f, 5.0f};
+	Rectangle pos_exp_bar = {WIDTH/2 - (91 * GUI_SCALE), HEIGHT - ((23+7)*GUI_SCALE), 182.0f * GUI_SCALE, 5.0f * GUI_SCALE};
+	DrawTexturePro(gui, rec_exp_bar, pos_exp_bar, (Vector2) {0}, 0.0f, WHITE);	
+
+	// Draw healt heart
+	for(int i = 0; i < 10; i++){
+		// Draw edge healt
+		Rectangle rec_heart_edge = {225.0f, 501.0f, 9.0f, 9.0f};
+		Rectangle pos_heart_edge = {WIDTH/2 - ((92-(i * 8)) * GUI_SCALE), HEIGHT - ((23 + 17)*GUI_SCALE), 9.0f * GUI_SCALE, 9.0f * GUI_SCALE};
+		DrawTexturePro(gui, rec_heart_edge, pos_heart_edge, (Vector2) {0}, 0.0f, WHITE);
+		// ---------------
+		Rectangle rec_heart = {82.0f, 502.0f, 7.0f, 7.0f};
+		Rectangle pos_heart = {WIDTH/2 - ((91-(i * 8)) * GUI_SCALE), HEIGHT - ((23 + 16)*GUI_SCALE), 7.0f * GUI_SCALE, 7.0f * GUI_SCALE};
+		DrawTexturePro(gui, rec_heart, pos_heart, (Vector2) {0}, 0.0f, WHITE);
+	}
+	
+	// Draw cosciotti, hunger
+	for(int i = 0; i < 10; i++){
+		// Draw edge hunger
+		Rectangle rec_hunger_edge = {177.0f, 242.0f, 9.0f, 9.0f};
+		Rectangle pos_hunger_edge = {WIDTH/2 + ((81-(i * 8)) * GUI_SCALE), HEIGHT - ((23 + 17)*GUI_SCALE), 9.0f * GUI_SCALE, 9.0f * GUI_SCALE};
+		DrawTexturePro(gui, rec_hunger_edge, pos_hunger_edge, (Vector2) {0}, 0.0f, WHITE);
+		// ---------------		
+		Rectangle rec_hunger = {196.0f, 243.0f, 7.0f, 7.0f};
+		Rectangle pos_hunger = {WIDTH/2 + ((82-(i * 8)) * GUI_SCALE), HEIGHT - ((23 + 16)*GUI_SCALE), 7.0f * GUI_SCALE, 7.0f * GUI_SCALE};
+		DrawTexturePro(gui, rec_hunger, pos_hunger, (Vector2) {0}, 0.0f, WHITE);
+	}
+	
+	// Draw ascii number
+	float dx = player->xp * 8;
+	Rectangle rec_number_edge = {dx, 24.0f, 5.0f, 7.0f};
+	Rectangle pos_number_edge = {WIDTH/2 - (2 * GUI_SCALE), HEIGHT - (((23 + 12+0.5)*GUI_SCALE)), 5.0f * GUI_SCALE, 7.0f * GUI_SCALE};
+	DrawTexturePro(ascii, rec_number_edge, pos_number_edge, (Vector2) {0}, 0.0f, BLACK);
+	// ---------------		
+	Rectangle rec_number = {dx, 24.0f, 5.0f, 7.0f};
+	Rectangle pos_number = {WIDTH/2 - ((2.5) * GUI_SCALE), HEIGHT - (((23 + 12)*GUI_SCALE)), 5.0f * GUI_SCALE, 7.0f * GUI_SCALE};
+	DrawTexturePro(ascii, rec_number, pos_number, (Vector2) {0}, 0.0f, XPGREEN);
+	
+}
+
+void UpdatePlayerStats(Player *player){
+	
+	int move = (int)GetMouseWheelMove();
+    if (move != 0) {
+		int newSlot = player->selectedSlotItemBar + move;
+		player -> selectedSlotItemBar = (newSlot % ITEM_BAR_SIZE + ITEM_BAR_SIZE) % ITEM_BAR_SIZE;
+	}
+}
+
+void Printplayer(Player *player, char f){
+	char char_dir[128];
+	sprintf(char_dir, "View direction: %f / %f / %f\n", player->lookDir.x, player->lookDir.y, player->lookDir.z);
+	DrawText(char_dir, 10, 50, FONT_SIZE, WHITE);
+	
+	/*char char_global_chunk[128];
+	sprintf(char_global_chunk, "Chunks[O] X:%d / Z:%d\n", ((int)player->camera.position.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE, ((int)player->camera.position.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE);
+	DrawText(char_global_chunk, 10, 150, FONT_SIZE, WHITE);	*/
+	
+	char char_xp[128];
+	sprintf(char_xp, "Level XP: %d / XP Bar: %d%\n", player->xp, player->xpBar * 3.125);
+	DrawText(char_xp, 10, 70, FONT_SIZE, WHITE);	
+	
+	char char_heal[128];
+	sprintf(char_heal, "Heal: %d%\n", player->heal * 5);
+	DrawText(char_heal, 10, 90, FONT_SIZE, WHITE);	
+	
+	char char_hungry[128];
+	sprintf(char_hungry, "Hungry: %d%\n", player->hungry * 5);
+	DrawText(char_hungry, 10, 110, FONT_SIZE, WHITE);
+	
+	char char_slotItemBar[128];
+	sprintf(char_slotItemBar, "Slot Item Bar: %d\n", player->selectedSlotItemBar);
+	DrawText(char_slotItemBar, 10, 130, FONT_SIZE, WHITE);
+	
+	// Temporary variables
+	DrawText("Tmp Variables from the player:\n", WIDTH - 
+				(MeasureText("Tmp Variables from the player:", FONT_SIZE) + 10), 30, FONT_SIZE, WHITE);
+		if(player->isInWater) DrawText("In water, ", WIDTH - 
+			(MeasureText("In water, ", FONT_SIZE) + 10), 50, FONT_SIZE, WHITE);
+		else DrawText("Not in water, ", WIDTH - 
+			(MeasureText("Not in water, ", FONT_SIZE) + 10), 50, FONT_SIZE, WHITE);
+		
+		if(player->isTakingDamage) DrawText("Taking damage (<1s ago)", WIDTH - 
+			(MeasureText("Taking damage (<1s ago", FONT_SIZE) + 10), 70, FONT_SIZE, WHITE);
+		else DrawText("No damage (<1s ago)\n", WIDTH - 
+			(MeasureText("No damage (<1s ago)", FONT_SIZE) + 10), 70, FONT_SIZE, WHITE);
+
+
+}
+
+void UpdateCustomCamera(struct CustomCamera *cam, float dt){
+    // MOUSE LOOK
+    Vector2 mouseDelta = GetMouseDelta();
+    cam->yaw -= mouseDelta.x * cam->ds;
+    cam->pitch -= mouseDelta.y * cam->ds;
+
+    // limit orizzontal view
+    if (cam->pitch > 89.0f)
+        cam->pitch = 89.0f;
+
+    if (cam->pitch < -89.0f)
+        cam->pitch = -89.0f;
+	
+    // DIREZIONE TELECAMERA
+    Vector3 forward = {
+        cosf(DEG2RAD * cam->pitch) * sinf(DEG2RAD * cam->yaw),
+        sinf(DEG2RAD * cam->pitch),
+        cosf(DEG2RAD * cam->pitch) * cosf(DEG2RAD * cam->yaw)
+    };
+	
+    forward = Vector3Normalize(forward);
+
+    // Destra della camera
+    Vector3 right = Vector3Normalize(
+        Vector3CrossProduct(forward, (Vector3){0,1,0})
+    );
+
+    // MOVING WSDA
+    float currentSpeed = cam->speed;
+
+    if (IsKeyDown(KEY_LEFT_CONTROL))
+        currentSpeed *= 2.0f;
+
+    if (IsKeyDown(KEY_W))
+		cam->position = Vector3Add( cam->position,
+							Vector3Scale(forward, currentSpeed * dt));
+
+    if (IsKeyDown(KEY_S))
+        cam->position = Vector3Subtract( cam->position,
+							Vector3Scale(forward, currentSpeed * dt));
+
+    if (IsKeyDown(KEY_D))
+        cam->position = Vector3Add( cam->position,
+							Vector3Scale(right, currentSpeed * dt));
+
+    if (IsKeyDown(KEY_A))
+        cam->position = Vector3Subtract(cam->position, 
+							Vector3Scale(right, currentSpeed * dt));
+	
+	if (IsKeyDown(KEY_SPACE))
+        cam->position.y += currentSpeed * dt;
+
+    if (IsKeyDown(KEY_LEFT_SHIFT))
+        cam->position.y -= currentSpeed * dt; 
+
+    // Update raylib Camera
+    cam->camera->position = cam->position;
+    cam->camera->target = Vector3Add(cam->position, forward);	
+	
 }
 
 float PerlinNoise(float x, float y, float z) {
@@ -714,11 +912,13 @@ int main(){
     Texture2D fnTerrain = LoadTexture("atlas_terrain.png");
     SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
 	Texture2D gui = LoadTexture("atlas_gui.png");
+	Texture2D ascii = LoadTexture("atlas_ascii.png");
     
     //CAMERA
 	Player *player = (Player*)malloc(sizeof(Player));
+	InitPlayer(player);
 	Camera3D *camera = &player->camera;
-    *camera = (Camera3D){10.0f, 50.0f, -10.0f, 
+    *camera = (Camera3D){0.0f, 50.0f, 0.0f, 
                        9.0f, 3.0f, 0.0f,
                        0.0f, 1.0f, 0.0f,
                        60.0f,
@@ -730,6 +930,11 @@ int main(){
     int lastChunkPlayerX = chunkPlayerX;
     int lastChunkPlayerZ = chunkPlayerZ;
     
+	// Custom Camera
+	struct CustomCamera *myCam;
+	*myCam = (struct CustomCamera){(Camera3D*)camera, 10.0f, 50.0f, -10.0f,
+						180.0f, 0.0f, 5.0f, 0.15};
+	
     // Build Initialize World 
 	Game *game = (Game*)malloc(sizeof(Game));
 	InizializeWorld(game->world, chunkPlayerX, chunkPlayerZ, fnTerrain);
@@ -744,7 +949,7 @@ int main(){
 		velocityPlayer.y -= GRAVITY * dt;
 		camera->position.y += velocityPlayer.y * dt;
 		//CAMERA
-        UpdateCamera(camera, CAMERA_FREE);
+        UpdateCustomCamera(myCam, dt);
 		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f", camera->position.x, camera->position.y, camera->position.z);
 		player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
 
@@ -761,7 +966,7 @@ int main(){
         BeginDrawing();
             ClearBackground(SKYBLUE);
 			
-            BeginMode3D(*camera);
+            BeginMode3D(*(myCam->camera));
             	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
 						if(IsInRange(player, game, wx, wz)){
@@ -771,9 +976,13 @@ int main(){
     			}   
             EndMode3D();
 			
+			// Sarebbe da fare i Command check
+			if(IsKeyDown(KEY_F3)) Printplayer(player, 0);
+			
 			DrawFPS(10, 10);
-			DrawText(textCordinates, 10, 30, 20, WHITE);
-			DrawGUI(gui);
+			DrawText(textCordinates, 10, 30, FONT_SIZE, WHITE);
+			UpdatePlayerStats(player);
+			DrawGUI(gui, ascii, player);
 			
         EndDrawing();
     }
@@ -783,6 +992,8 @@ int main(){
      	}
     }  
     UnloadTexture(fnTerrain);
+	UnloadTexture(gui);
+	UnloadTexture(ascii);
     CloseWindow(); 
 	
 	free(player);
