@@ -2,6 +2,7 @@
  [x] inseriamo il volo																	|
  [x] inseriamo il piazzamento e togliemento blocchi										|
  [x] ottimizzare la generazione chunk													|05/08/26 <note: da fare con i threads>
+ [] gui blocchetti nell inventario														|
  [] poter selzionare blocchi da piazzare												|
  [] inserisco poi le colisioni 3D														|
  [] gravità e il salto	 																|
@@ -17,8 +18,7 @@
 #include <raymath.h>
 #include <stdbool.h>
 
-#define XPGREEN CLITERAL(Color){ 128, 255, 32, 255 } // XP Green
-
+// SCREEN
 #define WIDTH 1800
 #define HEIGHT 1200
 
@@ -29,20 +29,23 @@
 #define ITEM_BAR_SIZE 9
 #define FONT_SIZE 20
 
+#define XPGREEN CLITERAL(Color){ 128, 255, 32, 255 } // XP Green
+
+//CHUNK
 #define CHUNK_SIZE 16
 #define CHUNK_HEIGTH 128
+#define MAX_CHUNK_FACES (CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6)
 
 #define HEIGHT_GROUND 110
 
 #define LOCAL_WORLD_SIZE 7
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
+// RAY
 #define MAX_RAY_DISTANCE 6
 #define STEP_RAY_SIZE 0.05
 
 #define GEN_QUEUE_SIZE 64
-
-#define MAX_CHUNK_FACES (CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6)
 
 
 int HEIGHTGROUND;
@@ -81,6 +84,20 @@ typedef struct Game{
 	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
 }Game;
 
+enum BlockType {
+	AIR 	= 0,
+	SAND 	= 1,
+	DIRT 	= 2,
+	GRASS 	= 3,
+	ROCK 	= 4,
+	WATER 	= 5,
+	SNOW 	= 6,
+	BADROCK = 7,
+	LEAF 	= 8,
+	LOG 	= 9,
+	MAX_BLOCK_TYPES
+};
+
 typedef struct Player{
 	Camera3D camera;
 	Vector3 lookDir;
@@ -96,6 +113,9 @@ typedef struct Player{
 	
 	unsigned int isInWater : 1;
 	unsigned int isTakingDamage : 1;
+	
+	unsigned int blocksInHand[ITEM_BAR_SIZE];
+	RenderTexture2D blockIcons[MAX_BLOCK_TYPES];
 	
 }Player;
 
@@ -116,20 +136,17 @@ void InitPlayer(struct Player *p){
     p->selectedSlotItemBar = 0;
     p->isInWater = 1;
     p->isTakingDamage = 0;
+	//for(int i = 0; i < 9; i++){ p->blocksInHand[i] = GRASS;}
+	p->blocksInHand[0] = GRASS;
+	p->blocksInHand[1] = AIR;
+	p->blocksInHand[2] = SAND;
+	p->blocksInHand[3] = GRASS;
+	p->blocksInHand[4] = SNOW;
+	p->blocksInHand[5] = WATER;
+	p->blocksInHand[6] = ROCK;
+	p->blocksInHand[7] = BADROCK;
+	p->blocksInHand[8] = LOG;
 }
-
-enum BlockType {
-	AIR 	= 0,
-	SAND 	= 1,
-	DIRT 	= 2,
-	GRASS 	= 3,
-	ROCK 	= 4,
-	WATER 	= 5,
-	SNOW 	= 6,
-	BADROCK = 7,
-	LEAF 	= 8,
-	LOG 	= 9
-};
 
 int IsTransparent(int blockID) {
     return (blockID == AIR || blockID == WATER || blockID == LEAF);
@@ -145,6 +162,22 @@ void DrawGUI(Texture2D gui, Texture2D ascii, Player *player){
 	Rectangle rec_item_bar = {72.0f, 457.0f, 182.0f, 22.0f};
 	Rectangle pos_item_bar = {WIDTH/2 - (91 * GUI_SCALE), HEIGHT - (23*GUI_SCALE), 182.0f * GUI_SCALE, 22.0f * GUI_SCALE};
 	DrawTexturePro(gui, rec_item_bar, pos_item_bar, (Vector2) {0}, 0.0f, WHITE);
+	
+	// Draw texture items in item bar
+	for(int i = 0; i < ITEM_BAR_SIZE; i++){
+		int id_block = player->blocksInHand[i];
+		if(id_block != AIR){
+			float icon_size = 16 * GUI_SCALE;
+			int posX = WIDTH/2 - ((91-3 - (i * 20)) * GUI_SCALE);
+			int posY = HEIGHT - ((23- 3)*GUI_SCALE);	
+			Rectangle src = {0.0f, 0.0f,
+							player->blockIcons[id_block].texture.width, 
+							-player->blockIcons[id_block].texture.height};
+			Rectangle dest = {posX, posY, icon_size, icon_size};
+			DrawTexturePro(player->blockIcons[id_block].texture, src, dest,(Vector2){0,0}, 0.0f, WHITE);  
+		}
+	}
+	
 	// Draw item square GetMouseWheelMove
 	Rectangle rec_item_box = {48.0f, 457.0f, 24.0f, 24.0f};
 	Rectangle pos_item_box = {WIDTH/2 - ((92 - (player->selectedSlotItemBar * 20)) * GUI_SCALE), HEIGHT - (24*GUI_SCALE), 24.0f * GUI_SCALE, 24.0f * GUI_SCALE};
@@ -190,6 +223,23 @@ void DrawGUI(Texture2D gui, Texture2D ascii, Player *player){
 	Rectangle pos_number = {WIDTH/2 - ((2.5) * GUI_SCALE), HEIGHT - (((23 + 12)*GUI_SCALE)), 5.0f * GUI_SCALE, 7.0f * GUI_SCALE};
 	DrawTexturePro(ascii, rec_number, pos_number, (Vector2) {0}, 0.0f, XPGREEN);
 	
+}
+
+void DrawSun(Player *player, Model sunModel){
+	double timeOfDay = GetTime() * 0.1; 
+
+	float raggioCielo = 200.0f; 
+
+	Vector3 sunPos = {
+		player->camera.position.x + (cosf(timeOfDay) * raggioCielo),
+		player->camera.position.y + (sinf(timeOfDay) * raggioCielo),
+		player->camera.position.z
+	};
+	
+	Vector3 rotationAxis = { 0.0f, 0.0f, 1.0f }; 
+    float rotationAngle = (timeOfDay * RAD2DEG) +90.0f;
+	//DrawCube(sunPos, 40.0f, 40.0f, 40.0f, RED);
+    DrawModelEx(sunModel, sunPos, rotationAxis, rotationAngle, (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
 }
 
 void UpdatePlayerStats(Player *player){
@@ -407,6 +457,100 @@ void GetCoordinatesFromAtlas(int textureID, int vertexID, float *u_out, float *v
 	if(vertexID == 1) { *u_out = topX; 						*v_out = topY + img_percent_height; }
 	if(vertexID == 2) { *u_out = topX + img_percent_width; 	*v_out = topY; }
 	if(vertexID == 3) { *u_out = topX + img_percent_width; 	*v_out = topY + img_percent_height; } 
+}
+
+Model BuildItemModel(int blockType) {
+    Mesh mesh = {0};
+    mesh.vertexCount = 24;
+    mesh.triangleCount = 12;
+    mesh.vertices = (float*)malloc(mesh.vertexCount * 3 * sizeof(float));
+    mesh.indices = (unsigned short*)malloc(mesh.triangleCount * 3 * sizeof(unsigned short));
+    mesh.texcoords = (float*)malloc(mesh.vertexCount * 2 * sizeof(float));
+
+    int vCount = 0, iCount = 0, tCount = 0;
+    int textureID = AIR;
+    if(blockType == SAND){ textureID = 18; }
+    else if(blockType == DIRT){ textureID = 2; }
+    else if(blockType == GRASS){ textureID = 3; }
+    else if(blockType == ROCK){ textureID = 1; }
+    else if(blockType == WATER){ textureID = 207; }
+    else if(blockType == SNOW){ textureID = 66; }
+    else if(blockType == BADROCK){ textureID = 17; }
+    else if(blockType == LEAF){ textureID = 52; }
+    else if(blockType == LOG){ textureID = 20; }
+
+    // Veritci coordinates for a (-0.5 0.5) cube
+    const float facce[6][4][3] = {
+        {{-0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}}, // Upper
+        {{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}}, // Under
+        {{0.5f, 0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}}, // DX
+        {{-0.5f, 0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}}, // SX
+        {{-0.5f, 0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}}, // BACK
+        {{0.5f, 0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}}  // FRONT
+    };
+
+    for(int f = 0; f < 6; f++) {
+        // vertices
+        for(int v = 0; v < 4; v++) {
+            mesh.vertices[vCount*3+0] = facce[f][v][0];
+            mesh.vertices[vCount*3+1] = facce[f][v][1];
+            mesh.vertices[vCount*3+2] = facce[f][v][2];
+            vCount++;
+        }
+
+        // index
+        int vBase = f * 4;
+        mesh.indices[iCount+0] = vBase + 0;
+        mesh.indices[iCount+1] = vBase + 1;
+        mesh.indices[iCount+2] = vBase + 2;
+        mesh.indices[iCount+3] = vBase + 1;
+        mesh.indices[iCount+4] = vBase + 3;
+        mesh.indices[iCount+5] = vBase + 2;
+        iCount += 6;
+
+        int tmpFaceID = textureID;
+        if(blockType == GRASS && f == 0) tmpFaceID = 0;
+        if(blockType == GRASS && f == 1) tmpFaceID = 2;
+
+        for(int nVer = 0; nVer < 4; nVer++){
+            float u, v;
+            GetCoordinatesFromAtlas(tmpFaceID, nVer, &u, &v);
+            mesh.texcoords[tCount+0] = u;
+            mesh.texcoords[tCount+1] = v;
+            tCount += 2;
+        }
+    }
+
+    UploadMesh(&mesh, false);
+    return LoadModelFromMesh(mesh);
+}
+
+void InitTextureInventary(Texture2D terrain, Player *player){
+	Camera3D Texturecam = {2.5f, 2.5f, 2.5f,	// position
+							0.0f, 0.0f, 0.0f,	// target
+							0.0f, 1.0f, 0.0f,	// up
+							2.2f,				// fovy
+							CAMERA_ORTHOGRAPHIC};// projection
+
+	for(int i = 0; i < MAX_BLOCK_TYPES; i++){
+		player->blockIcons[i] = LoadRenderTexture(128, 128);
+			
+		if (i != AIR) {
+			Model itemModel = BuildItemModel(i);
+			itemModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = terrain;
+
+			BeginTextureMode(player->blockIcons[i]);
+				ClearBackground(BLANK);
+				
+				BeginMode3D(Texturecam);
+					DrawModel(itemModel, (Vector3){0.0f,0.0f,0.0f}, 1.0f, WHITE);
+					//DrawCubeWires(Vector3Zero(), 1.0f, 1.0f, 1.0f, BLACK);
+				EndMode3D();
+			EndTextureMode();
+
+			UnloadModel(itemModel); 
+		}
+	}
 }
 
 void BuildTree(Chunk *c, int x, int y, int z){
@@ -681,6 +825,46 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
     c -> model = LoadModelFromMesh(ChunkMesh);              
 }
 
+Model BuildModel(Texture2D tex, float size, float cutX, float cutY, float cutW, float cutH) {
+    Mesh mesh = {0};
+    mesh.vertexCount = 4;
+    mesh.triangleCount = 2;
+    mesh.vertices = (float*)malloc(mesh.vertexCount * 3 * sizeof(float));
+    mesh.indices = (unsigned short*)malloc(mesh.triangleCount * 3 * sizeof(unsigned short));
+    mesh.texcoords = (float*)malloc(mesh.vertexCount * 2 * sizeof(float));
+
+    float hs = size / 2.0f;
+
+	float v[12] = {
+			-hs, 0.0f, -hs, // Alto-Sinistra
+			-hs, 0.0f,  hs, // Basso-Sinistra
+			 hs, 0.0f,  hs, // Basso-Destra
+			 hs, 0.0f, -hs  // Alto-Destra
+		};
+    memcpy(mesh.vertices, v, sizeof(v));
+
+    // Ordine per i due triangoli del quadrato
+    unsigned short i[6] = { 0, 1, 2, 0, 2, 3 };
+    memcpy(mesh.indices, i, sizeof(i));
+
+    float imgW = (float)tex.width;
+    float imgH = (float)tex.height;
+
+    // Convertiamo i pixel (da 0.0f a 1.0f) richieste dal motore grafico
+    float norm[8] = {
+        cutX/imgW,       (cutY+cutH)/imgH, 
+        cutX/imgW,       cutY/imgH,     
+        (cutX+cutW)/imgW,   cutY/imgH,     
+        (cutX+cutW)/imgW,   (cutY+cutH)/imgH  
+    };
+    memcpy(mesh.texcoords, norm, sizeof(norm));
+
+    UploadMesh(&mesh, false);
+    Model model = LoadModelFromMesh(mesh);
+    model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = tex;
+    return model;
+}
+
 void UpdateChunkGraph(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int cx, int cz, Texture2D fnTerrain) {
     int wx = (cx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
     int wz = (cz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -695,97 +879,97 @@ void UpdateChunkGraph(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int cx, i
 }
 
 void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerPosition, int *lastChunkPlayerX, int *lastChunkPlayerZ, Texture2D fnTerrain){
-		int chunkPlayerX = (int) floorf(playerPosition.x / CHUNK_SIZE); 
-		int chunkPlayerZ = (int) floorf(playerPosition.z / CHUNK_SIZE); 
-        
-        if (chunkPlayerX != *lastChunkPlayerX || chunkPlayerZ != *lastChunkPlayerZ) {
-            for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
-                for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
-                    
-                    int gx = chunkPlayerX + dx;
-                    int gz = chunkPlayerZ + dz;
-                    
-                    int wx = (gx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-                    int wz = (gz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-                    
-                    // Se lo slot non contiene le coordinate corrette, significa che c'è
-                    // un vecchio chunk ormai lontano
-                    if (world[wx][wz].gridX != gx || world[wx][wz].gridZ != gz) {
-                        if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
-                        world[wx][wz].model = (Model){0};
-						world[wx][wz].needRemesh = false;
-                        
-						dataQueueGX[dataTail] = gx;
-						dataQueueGZ[dataTail] = gz;
-						dataQueueWX[dataTail] = wx;
-						dataQueueWZ[dataTail] = wz;
-						dataTail = (dataTail + 1) % GEN_QUEUE_SIZE;
-						
-                    }
-                }
-            }
-            *lastChunkPlayerX = chunkPlayerX;
-            *lastChunkPlayerZ = chunkPlayerZ;
-        }
-		
-		/*
-		 * I switch if -> while bc daa is fast and I wanna 
-		*/
-		while (dataHead != dataTail) {
-			int wx = dataQueueWX[dataHead];
-			int wz = dataQueueWZ[dataHead];
-			int gx = dataQueueGX[dataHead];
-			int gz = dataQueueGZ[dataHead];
-			dataHead = (dataHead + 1) % GEN_QUEUE_SIZE;
-			
-			BuildChunkData(&world[wx][wz], gx, gz);
-
-			genQueueGX[genTail] = gx;
-			genQueueGZ[genTail] = gz;
-			genQueueWX[genTail] = wx;
-			genQueueWZ[genTail] = wz;
-			genTail = (genTail + 1) % GEN_QUEUE_SIZE;
-			
-			/*
-			 * nborX and nborZ are used for help me to find the 4 neighbor of an chunk
-			 * ngx and ngz are the global X,Z coordinate of the neighbor 
-		     * nwx and nwz are the local one
-			 * nb the neighbor
-			*/
-			int nborX[4] = {1, -1, 0, 0};
-			int nborZ[4] = {0, 0, 1, -1};
-			for (int n = 0; n < 4; n++) {
-				int ngx = gx + nborX[n];
-				int ngz = gz + nborZ[n];
-				int nwx = (ngx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-				int nwz = (ngz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
-				Chunk *nb = &world[nwx][nwz];
-				if (nb->gridX == ngx && nb->gridZ == ngz && nb->model.meshCount > 0) {
-					nb->needRemesh = true;
+	int chunkPlayerX = (int) floorf(playerPosition.x / CHUNK_SIZE); 
+	int chunkPlayerZ = (int) floorf(playerPosition.z / CHUNK_SIZE); 
+	
+	if (chunkPlayerX != *lastChunkPlayerX || chunkPlayerZ != *lastChunkPlayerZ) {
+		for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+			for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+				
+				int gx = chunkPlayerX + dx;
+				int gz = chunkPlayerZ + dz;
+				
+				int wx = (gx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+				int wz = (gz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+				
+				// Se lo slot non contiene le coordinate corrette, significa che c'è
+				// un vecchio chunk ormai lontano
+				if (world[wx][wz].gridX != gx || world[wx][wz].gridZ != gz) {
+					if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
+					world[wx][wz].model = (Model){0};
+					world[wx][wz].needRemesh = false;
+					
+					dataQueueGX[dataTail] = gx;
+					dataQueueGZ[dataTail] = gz;
+					dataQueueWX[dataTail] = wx;
+					dataQueueWZ[dataTail] = wz;
+					dataTail = (dataTail + 1) % GEN_QUEUE_SIZE;
+					
 				}
 			}
 		}
+		*lastChunkPlayerX = chunkPlayerX;
+		*lastChunkPlayerZ = chunkPlayerZ;
+	}
+	
+	/*
+	 * I switch if -> while bc daa is fast and I wanna 
+	*/
+	while (dataHead != dataTail) {
+		int wx = dataQueueWX[dataHead];
+		int wz = dataQueueWZ[dataHead];
+		int gx = dataQueueGX[dataHead];
+		int gz = dataQueueGZ[dataHead];
+		dataHead = (dataHead + 1) % GEN_QUEUE_SIZE;
 		
-		if (genHead != genTail) {
- 			int wx = genQueueWX[genHead];
-    		int wz = genQueueWZ[genHead];
-    		int gx = genQueueGX[genHead];
-    		int gz = genQueueGZ[genHead];
-    		genHead = (genHead + 1) % GEN_QUEUE_SIZE;
-    		BuildChunkMesh(world, &world[wx][wz], gx, gz);
-    		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-		} /*else {*/
+		BuildChunkData(&world[wx][wz], gx, gz);
+
+		genQueueGX[genTail] = gx;
+		genQueueGZ[genTail] = gz;
+		genQueueWX[genTail] = wx;
+		genQueueWZ[genTail] = wz;
+		genTail = (genTail + 1) % GEN_QUEUE_SIZE;
+		
+		/*
+		 * nborX and nborZ are used for help me to find the 4 neighbor of an chunk
+		 * ngx and ngz are the global X,Z coordinate of the neighbor 
+		 * nwx and nwz are the local one
+		 * nb the neighbor
+		*/
+		int nborX[4] = {1, -1, 0, 0};
+		int nborZ[4] = {0, 0, 1, -1};
+		for (int n = 0; n < 4; n++) {
+			int ngx = gx + nborX[n];
+			int ngz = gz + nborZ[n];
+			int nwx = (ngx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+			int nwz = (ngz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
+			Chunk *nb = &world[nwx][nwz];
+			if (nb->gridX == ngx && nb->gridZ == ngz && nb->model.meshCount > 0) {
+				nb->needRemesh = true;
+			}
+		}
+	}
+	
+	if (genHead != genTail) {
+		int wx = genQueueWX[genHead];
+		int wz = genQueueWZ[genHead];
+		int gx = genQueueGX[genHead];
+		int gz = genQueueGZ[genHead];
+		genHead = (genHead + 1) % GEN_QUEUE_SIZE;
+		BuildChunkMesh(world, &world[wx][wz], gx, gz);
+		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+	} /*else {*/
 			
-for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
-    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-        if (world[wx][wz].needRemesh) {
-            UnloadModel(world[wx][wz].model);
-            BuildChunkMesh(world, &world[wx][wz], world[wx][wz].gridX, world[wx][wz].gridZ);
-            world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-            world[wx][wz].needRemesh = false;
-        }
-    }
-}
+	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
+		for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
+			if (world[wx][wz].needRemesh) {
+				UnloadModel(world[wx][wz].model);
+				BuildChunkMesh(world, &world[wx][wz], world[wx][wz].gridX, world[wx][wz].gridZ);
+				world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+				world[wx][wz].needRemesh = false;
+			}
+		}
+	}
 }
 
 void InizializeWorld(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int chunkPlayerX, int chunkPlayerZ, Texture2D fnTerrain){
@@ -849,6 +1033,7 @@ void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 }
 
 void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
+	int block_selected = player->blocksInHand[(int)player->selectedSlotItemBar];
 	player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
 	player->ray = player->camera.position;
 	
@@ -874,7 +1059,7 @@ void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 			int lx = (prec_gx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 			int lz = (prec_gz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 			
-			game->world[wx][wz].Map[lx][prec_gy][lz] = 1;
+			game->world[wx][wz].Map[lx][prec_gy][lz] = block_selected;
 			UpdateChunkGraph(game->world, chunkX, chunkZ, fnTerrain);
 			if (lx == 0) { UpdateChunkGraph(game->world, chunkX - 1, chunkZ, fnTerrain);}
 			else if (lx == CHUNK_SIZE - 1) { UpdateChunkGraph(game->world, chunkX + 1, chunkZ, fnTerrain);}
@@ -906,6 +1091,7 @@ int IsInRange(Player *player, Game *game, int wx, int wz){
 	return 0;
 }
 
+
 int main(){
     
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
@@ -913,7 +1099,10 @@ int main(){
     SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
 	Texture2D gui = LoadTexture("atlas_gui.png");
 	Texture2D ascii = LoadTexture("atlas_ascii.png");
-    
+	Texture2D cielo = LoadTexture("atlas_celestials.png");
+	
+	Model sunModel = BuildModel(cielo, 40, 175, 47, 8, 8);
+	
     //CAMERA
 	Player *player = (Player*)malloc(sizeof(Player));
 	InitPlayer(player);
@@ -931,7 +1120,7 @@ int main(){
     int lastChunkPlayerZ = chunkPlayerZ;
     
 	// Custom Camera
-	struct CustomCamera *myCam;
+	struct CustomCamera *myCam = (struct CustomCamera*)malloc(sizeof(struct CustomCamera));;
 	*myCam = (struct CustomCamera){(Camera3D*)camera, 10.0f, 50.0f, -10.0f,
 						180.0f, 0.0f, 5.0f, 0.15};
 	
@@ -939,6 +1128,9 @@ int main(){
 	Game *game = (Game*)malloc(sizeof(Game));
 	InizializeWorld(game->world, chunkPlayerX, chunkPlayerZ, fnTerrain);
 
+	// Init Texture Inventary blocks
+	InitTextureInventary(fnTerrain, player);
+	
     SetTargetFPS(540); 
     DisableCursor();
 	char textCordinates[128];
@@ -974,7 +1166,9 @@ int main(){
 						}
 					}
     			}   
-            EndMode3D();
+			DrawSun(player, sunModel);
+			
+			EndMode3D();
 			
 			// Sarebbe da fare i Command check
 			if(IsKeyDown(KEY_F3)) Printplayer(player, 0);
@@ -983,20 +1177,28 @@ int main(){
 			DrawText(textCordinates, 10, 30, FONT_SIZE, WHITE);
 			UpdatePlayerStats(player);
 			DrawGUI(gui, ascii, player);
-			
+
         EndDrawing();
     }
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
       		UnloadModel(game->world[wx][wz].model);
      	}
-    }  
+    } 
+
+	for(int i = 0; i < MAX_BLOCK_TYPES; i++){
+		UnloadRenderTexture(player->blockIcons[i]);
+	}
+	
     UnloadTexture(fnTerrain);
 	UnloadTexture(gui);
 	UnloadTexture(ascii);
+	UnloadTexture(cielo);
+	UnloadModel(sunModel);
     CloseWindow(); 
 	
 	free(player);
 	free(game);
+	free(myCam);
     return 0;
 }
