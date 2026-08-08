@@ -6,7 +6,7 @@
  [] poter selzionare blocchi da piazzare												|
  [] inserisco poi le colisioni 3D														|
  [] gravità e il salto	 																|
- [] inseriamo il sole, alberi, montagne													|
+ [] inseriamo il sole, luna, alberi, montagne											|
  [] inseriamo la terza persona e prima persona. 										|
 */
 
@@ -17,6 +17,10 @@
 #include <string.h>
 #include <raymath.h>
 #include <stdbool.h>
+
+// GLOBAL
+#define TICKS_PER_DAY 24000
+#define TICK_RATE     200.0f
 
 // SCREEN
 #define WIDTH 1800
@@ -71,6 +75,13 @@ float temp_vertici[MAX_CHUNK_FACES * 4 * 3];
 unsigned short temp_indici[MAX_CHUNK_FACES * 6];
 float temp_texcoords[MAX_CHUNK_FACES * 4 * 2];
 
+typedef struct Time{
+    long long totTicks;
+    int   timeOfDay;
+    float accumulator;
+	float dailyPhase;
+}Time;
+
 typedef struct Chunk{
     int gridX;
     int gridZ;
@@ -82,6 +93,7 @@ typedef struct Chunk{
 
 typedef struct Game{
 	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
+	Time time;
 }Game;
 
 enum BlockType {
@@ -225,21 +237,45 @@ void DrawGUI(Texture2D gui, Texture2D ascii, Player *player){
 	
 }
 
-void DrawSun(Player *player, Model sunModel){
-	double timeOfDay = GetTime() * 0.1; 
+void UpgradeTime(Time *t, float dt){
+	t->accumulator += dt;
+	while(t->accumulator >= 1.0f / TICK_RATE){
+		t->accumulator -= 1.0f / TICK_RATE;
+		t->totTicks++;
+		t->timeOfDay = (t->timeOfDay + 1) % TICKS_PER_DAY;
+	}
+}
 
-	float raggioCielo = 200.0f; 
-
-	Vector3 sunPos = {
-		player->camera.position.x + (cosf(timeOfDay) * raggioCielo),
-		player->camera.position.y + (sinf(timeOfDay) * raggioCielo),
-		player->camera.position.z
-	};
+void DrawSun(Vector3 *position, Time *t, Model sunModel, Model moonModel){
+	float phase = (float)t->timeOfDay / (float)TICKS_PER_DAY; // 0 sunrise 0.25 mezzogiorno
+	t->dailyPhase = phase;
+	float angle = phase * 2.0f * PI;
+	float sunRadius = 2000.f;
+	float moonRadius = 2000.0f;
 	
-	Vector3 rotationAxis = { 0.0f, 0.0f, 1.0f }; 
-    float rotationAngle = (timeOfDay * RAD2DEG) +90.0f;
-	//DrawCube(sunPos, 40.0f, 40.0f, 40.0f, RED);
-    DrawModelEx(sunModel, sunPos, rotationAxis, rotationAngle, (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
+	float cx = position->x;
+    float cy = position->y;
+    float cz = position->z;
+
+    Vector3 sunPos = {
+        cx + cosf(angle) * sunRadius,
+        cy + sinf(angle) * sunRadius,
+        cz
+    };
+    Vector3 moonPos = {
+        cx - cosf(angle) * moonRadius,
+        cy - sinf(angle) * moonRadius,
+        cz
+    };
+
+    Vector3 rotationAx = { 0.0f, 0.0f, 1.0f };
+    float rotationAngle = (angle * RAD2DEG) + 90.0f;
+
+    DrawModelEx(sunModel,  sunPos,  rotationAx, rotationAngle,
+                (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
+    // +180: gira la luna così la faccia frontale guarda il giocatore
+    DrawModelEx(moonModel, moonPos, rotationAx, rotationAngle + 180.0f,
+                (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
 }
 
 void UpdatePlayerStats(Player *player){
@@ -251,7 +287,7 @@ void UpdatePlayerStats(Player *player){
 	}
 }
 
-void Printplayer(Player *player, char f){
+void Printplayer(Player *player, Game *game, char f){
 	char char_dir[128];
 	sprintf(char_dir, "View direction: %f / %f / %f\n", player->lookDir.x, player->lookDir.y, player->lookDir.z);
 	DrawText(char_dir, 10, 50, FONT_SIZE, WHITE);
@@ -276,20 +312,29 @@ void Printplayer(Player *player, char f){
 	sprintf(char_slotItemBar, "Slot Item Bar: %d\n", player->selectedSlotItemBar);
 	DrawText(char_slotItemBar, 10, 130, FONT_SIZE, WHITE);
 	
+	// Global game's variables
+	DrawText("Global game's variables:\n", WIDTH - 
+				(MeasureText("Global game's variables:", FONT_SIZE) + 10), 30, FONT_SIZE, WHITE);
+		char char_tick[1024];
+		sprintf(char_tick, "Total Ticks: %lld / Phase: %.2f\n"
+							"Day: %d / Dailytime: %d", 
+							game->time.totTicks, (float)game->time.timeOfDay / (float)TICKS_PER_DAY,
+							(int)game->time.totTicks / TICKS_PER_DAY, (int)game->time.totTicks % TICKS_PER_DAY); 
+		DrawText(char_tick, WIDTH - 
+					(MeasureText(char_tick, FONT_SIZE) + 10), 50, FONT_SIZE, WHITE);
+		
 	// Temporary variables
 	DrawText("Tmp Variables from the player:\n", WIDTH - 
-				(MeasureText("Tmp Variables from the player:", FONT_SIZE) + 10), 30, FONT_SIZE, WHITE);
+				(MeasureText("Tmp Variables from the player:", FONT_SIZE) + 10), 90, FONT_SIZE, WHITE);
 		if(player->isInWater) DrawText("In water, ", WIDTH - 
-			(MeasureText("In water, ", FONT_SIZE) + 10), 50, FONT_SIZE, WHITE);
+			(MeasureText("In water, ", FONT_SIZE) + 10), 110, FONT_SIZE, WHITE);
 		else DrawText("Not in water, ", WIDTH - 
-			(MeasureText("Not in water, ", FONT_SIZE) + 10), 50, FONT_SIZE, WHITE);
+			(MeasureText("Not in water, ", FONT_SIZE) + 10), 110, FONT_SIZE, WHITE);
 		
 		if(player->isTakingDamage) DrawText("Taking damage (<1s ago)", WIDTH - 
-			(MeasureText("Taking damage (<1s ago", FONT_SIZE) + 10), 70, FONT_SIZE, WHITE);
+			(MeasureText("Taking damage (<1s ago", FONT_SIZE) + 10), 130, FONT_SIZE, WHITE);
 		else DrawText("No damage (<1s ago)\n", WIDTH - 
-			(MeasureText("No damage (<1s ago)", FONT_SIZE) + 10), 70, FONT_SIZE, WHITE);
-
-
+			(MeasureText("No damage (<1s ago)", FONT_SIZE) + 10), 130, FONT_SIZE, WHITE);
 }
 
 void UpdateCustomCamera(struct CustomCamera *cam, float dt){
@@ -998,6 +1043,13 @@ void InizializeWorld(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int chunkP
     }
 }
 
+void InitWorldTime(Time *wt){
+    wt->totTicks  = 0;
+    wt->timeOfDay   = 0;
+    wt->accumulator = 0.0f;
+	wt->dailyPhase = 0.0f;
+}
+
 void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 	player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
 	player->ray = player->camera.position;
@@ -1091,7 +1143,6 @@ int IsInRange(Player *player, Game *game, int wx, int wz){
 	return 0;
 }
 
-
 int main(){
     
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
@@ -1101,7 +1152,8 @@ int main(){
 	Texture2D ascii = LoadTexture("atlas_ascii.png");
 	Texture2D cielo = LoadTexture("atlas_celestials.png");
 	
-	Model sunModel = BuildModel(cielo, 40, 175, 47, 8, 8);
+	Model sunModel = BuildModel(cielo, 400, 175, 47, 8, 8);
+	Model moonModel = BuildModel(cielo, 400, 79, 13, 8, 8);
 	
     //CAMERA
 	Player *player = (Player*)malloc(sizeof(Player));
@@ -1126,6 +1178,8 @@ int main(){
 	
     // Build Initialize World 
 	Game *game = (Game*)malloc(sizeof(Game));
+	//Game *game = (Game*)calloc(1, sizeof(Game));
+	InitWorldTime(&game->time);
 	InizializeWorld(game->world, chunkPlayerX, chunkPlayerZ, fnTerrain);
 
 	// Init Texture Inventary blocks
@@ -1140,6 +1194,10 @@ int main(){
 		dt = GetFrameTime();
 		velocityPlayer.y -= GRAVITY * dt;
 		camera->position.y += velocityPlayer.y * dt;
+		
+		// TIME
+		UpgradeTime(&game->time, dt);
+		
 		//CAMERA
         UpdateCustomCamera(myCam, dt);
 		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f", camera->position.x, camera->position.y, camera->position.z);
@@ -1148,13 +1206,15 @@ int main(){
 		
 		BuildChunk(game->world, camera->position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
 
+		// Sarebbe da fare i Command check
 		if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
 			DeleteBlockRay(player, game, fnTerrain);
 		}
 		if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)){
 			PlaceBlockRay(player, game, fnTerrain);
-		}
+		}		
 
+		
         BeginDrawing();
             ClearBackground(SKYBLUE);
 			
@@ -1166,18 +1226,16 @@ int main(){
 						}
 					}
     			}   
-			DrawSun(player, sunModel);
-			
+			DrawSun(&player->camera.position, &game->time, sunModel, moonModel);
+
 			EndMode3D();
-			
-			// Sarebbe da fare i Command check
-			if(IsKeyDown(KEY_F3)) Printplayer(player, 0);
 			
 			DrawFPS(10, 10);
 			DrawText(textCordinates, 10, 30, FONT_SIZE, WHITE);
 			UpdatePlayerStats(player);
 			DrawGUI(gui, ascii, player);
-
+			
+			if(IsKeyDown(KEY_F3)) Printplayer(player, game, 0);
         EndDrawing();
     }
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
@@ -1195,6 +1253,7 @@ int main(){
 	UnloadTexture(ascii);
 	UnloadTexture(cielo);
 	UnloadModel(sunModel);
+	UnloadModel(moonModel);
     CloseWindow(); 
 	
 	free(player);
