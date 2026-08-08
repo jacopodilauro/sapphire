@@ -33,7 +33,11 @@
 #define ITEM_BAR_SIZE 9
 #define FONT_SIZE 20
 
-#define XPGREEN CLITERAL(Color){ 128, 255, 32, 255 } // XP Green
+#define SKY_DAY     CLITERAL (Color){ 102, 191, 255, 255 }  	// azzurro
+#define SKY_SUNSET  CLITERAL (Color){ 252,  93,  46, 255 }  	// arancio caldo
+#define SKY_SUNRISE CLITERAL (Color){ 255, 140,  80, 255 }  	// rosato
+#define SKY_NIGHT  	CLITERAL (Color){   8,  10,  32, 255 }	 	// blu scuro
+#define XPGREEN 	CLITERAL (Color){ 128, 255,  32, 255 } 		// XP Green
 
 //CHUNK
 #define CHUNK_SIZE 16
@@ -50,7 +54,6 @@
 #define STEP_RAY_SIZE 0.05
 
 #define GEN_QUEUE_SIZE 64
-
 
 int HEIGHTGROUND;
 int WATER_LEVEL;
@@ -79,7 +82,7 @@ typedef struct Time{
     long long totTicks;
     int   timeOfDay;
     float accumulator;
-	float dailyPhase;
+	unsigned int dailyPhase : 2;
 }Time;
 
 typedef struct Chunk{
@@ -248,7 +251,7 @@ void UpgradeTime(Time *t, float dt){
 
 void DrawSun(Vector3 *position, Time *t, Model sunModel, Model moonModel){
 	float phase = (float)t->timeOfDay / (float)TICKS_PER_DAY; // 0 sunrise 0.25 mezzogiorno
-	t->dailyPhase = phase;
+	t->dailyPhase = (int)phase;
 	float angle = phase * 2.0f * PI;
 	float sunRadius = 2000.f;
 	float moonRadius = 2000.0f;
@@ -273,7 +276,6 @@ void DrawSun(Vector3 *position, Time *t, Model sunModel, Model moonModel){
 
     DrawModelEx(sunModel,  sunPos,  rotationAx, rotationAngle,
                 (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
-    // +180: gira la luna così la faccia frontale guarda il giocatore
     DrawModelEx(moonModel, moonPos, rotationAx, rotationAngle + 180.0f,
                 (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
 }
@@ -1017,7 +1019,9 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 	}
 }
 
-void InizializeWorld(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int chunkPlayerX, int chunkPlayerZ, Texture2D fnTerrain){
+void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D fnTerrain){
+	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
+	memcpy(world, game->world, sizeof(world));
 	for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
         for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
             // Coordinate globali del chunk desiderato
@@ -1047,7 +1051,7 @@ void InitWorldTime(Time *wt){
     wt->totTicks  = 0;
     wt->timeOfDay   = 0;
     wt->accumulator = 0.0f;
-	wt->dailyPhase = 0.0f;
+	wt->dailyPhase = 0;
 }
 
 void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
@@ -1143,6 +1147,13 @@ int IsInRange(Player *player, Game *game, int wx, int wz){
 	return 0;
 }
 
+Color GetSkyColor(int t){ // https://minecraft.wiki/w/Daylight_cycle#Daytime
+	if(t < 12000) return SKY_DAY; 
+	else if(t >= 12000 && t < 13000) return SKY_SUNRISE;
+	else if(t >= 13000 && t < 23000) return SKY_NIGHT;
+	else return SKY_SUNSET;
+}
+
 int main(){
     
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
@@ -1178,9 +1189,9 @@ int main(){
 	
     // Build Initialize World 
 	Game *game = (Game*)malloc(sizeof(Game));
-	//Game *game = (Game*)calloc(1, sizeof(Game));
+	InizializeWorld(game, chunkPlayerX, chunkPlayerZ, fnTerrain);
 	InitWorldTime(&game->time);
-	InizializeWorld(game->world, chunkPlayerX, chunkPlayerZ, fnTerrain);
+
 
 	// Init Texture Inventary blocks
 	InitTextureInventary(fnTerrain, player);
@@ -1216,7 +1227,7 @@ int main(){
 
 		
         BeginDrawing();
-            ClearBackground(SKYBLUE);
+            ClearBackground(GetSkyColor(game->time.timeOfDay));
 			
             BeginMode3D(*(myCam->camera));
             	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
