@@ -2,11 +2,11 @@
  [x] inseriamo il volo																	|
  [x] inseriamo il piazzamento e togliemento blocchi										|
  [x] ottimizzare la generazione chunk													|05/08/26 <note: da fare con i threads>
- [] gui blocchetti nell inventario														|
- [] poter selzionare blocchi da piazzare												|
+ [x] gui blocchetti nell inventario														|
+ [x] poter selzionare blocchi da piazzare												|
  [] inserisco poi le colisioni 3D														|
  [] gravità e il salto	 																|
- [] inseriamo il sole, luna, alberi, montagne											|
+ [x] inseriamo il sole, luna, alberi, montagne											|
  [] inseriamo la terza persona e prima persona. 										|
 */
 
@@ -26,7 +26,7 @@
 #define WIDTH 1800
 #define HEIGHT 1200
 
-#define GRAVITY 0
+#define GRAVITY 25
 
 // GUI
 #define GUI_SCALE 5
@@ -40,7 +40,7 @@
 #define XPGREEN 	CLITERAL (Color){ 128, 255,  32, 255 } 		// XP Green
 
 //CHUNK
-#define CHUNK_SIZE 16
+#define CHUNK_SIZE 16 // ATTENZIONE!!!!!!!: changes ? modify -> GetBlockGlobal
 #define CHUNK_HEIGTH 128
 #define MAX_CHUNK_FACES (CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6)
 
@@ -48,6 +48,15 @@
 
 #define LOCAL_WORLD_SIZE 7
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
+
+// PLAYER
+#define PLAYER_WIDTH   0.6f
+#define PLAYER_HEIGHT  1.8f
+#define PLAYER_EYE 	   1.6f
+#define PLAYER_SPEED   5.0f
+#define JUMP_SPEED     8.0f
+
+#define SENS_MOUSE 	  0.15f
 
 // RAY
 #define MAX_RAY_DISTANCE 6
@@ -113,21 +122,34 @@ enum BlockType {
 	MAX_BLOCK_TYPES
 };
 
+typedef struct CameraController{
+	float yaw;
+	float pitch;
+	float sensitivity;
+}CameraController;
+
 typedef struct Player{
+	Vector3 position;
+	Vector3 velocity;
+	BoundingBox playerBox;
 	Camera3D camera;
+	CameraController view;
 	Vector3 lookDir;
 	Vector3 ray;
 	
 	// Bit field
 	unsigned int xp : 7; 
 	
-	unsigned int hungry : 5;
-	unsigned int heal : 5;
-	unsigned int xpBar : 5;
+	unsigned int hungry 	: 5;
+	unsigned int heal 		: 5;
+	unsigned int xpBar 		: 5;
 	int selectedSlotItemBar : 5;
 	
-	unsigned int isInWater : 1;
+	unsigned int isInWater 		: 1;
 	unsigned int isTakingDamage : 1;
+	unsigned int isCollisioning : 1;
+	unsigned int isOnGround 	: 1;
+	unsigned int isFlying		: 1;
 	
 	unsigned int blocksInHand[ITEM_BAR_SIZE];
 	RenderTexture2D blockIcons[MAX_BLOCK_TYPES];
@@ -144,13 +166,35 @@ typedef struct CustomCamera{
 }CustomCamera;
 
 void InitPlayer(struct Player *p){
+	p->position = (Vector3){ 0.0f, 50.0f, 0.0f };
+	p->velocity = (Vector3){0};
+	p->isOnGround 		= 0;
+	p->isFlying 		= 1;
+	p->isCollisioning 	= 0;
+
+	p->view.yaw 		= 180.0f;
+	p->view.pitch 		= 0.0f;
+	p->view.sensitivity = 0.15f;
+
+	p->camera.up = (Vector3){0.0f, 1.0f, 0.0f};
+	p->camera.fovy = 60.0f;
+	p->camera.projection = CAMERA_PERSPECTIVE;
+	p->camera.position = (Vector3){ p->position.x, p->position.y + PLAYER_EYE, p->position.z };
+	p->camera.target = Vector3Add(p->camera.position, (Vector3){0.0f, 0.0f, -1.0f});
+	
     p->xp = 4;
     p->hungry = 20;
     p->heal = 20;
     p->xpBar = 0;
     p->selectedSlotItemBar = 0;
-    p->isInWater = 1;
+    p->isInWater = 0;
     p->isTakingDamage = 0;
+	/*p->position = (Vector3){ p->camera.position.x,
+							 p->camera.position.y - PLAYER_EYE,
+							 p->camera.position.z };
+	p->velocity = (Vector3){ 0 };
+	p->isOnGround = 0;
+	p->isCollisioning = 0;*/
 	//for(int i = 0; i < 9; i++){ p->blocksInHand[i] = GRASS;}
 	p->blocksInHand[0] = GRASS;
 	p->blocksInHand[1] = AIR;
@@ -161,6 +205,12 @@ void InitPlayer(struct Player *p){
 	p->blocksInHand[6] = ROCK;
 	p->blocksInHand[7] = BADROCK;
 	p->blocksInHand[8] = LOG;
+}
+
+BoundingBox PosToBox(Vector3 *pos){
+	float dw = PLAYER_WIDTH / 2;
+	return (BoundingBox){ pos->x - dw, pos->y,					pos->z - dw,
+						  pos->x + dw, pos->y + PLAYER_HEIGHT,	pos->z + dw};
 }
 
 int IsTransparent(int blockID) {
@@ -262,12 +312,12 @@ void DrawSun(Vector3 *position, Time *t, Model sunModel, Model moonModel){
 
     Vector3 sunPos = {
         cx + cosf(angle) * sunRadius,
-        cy + sinf(angle) * sunRadius,
+        64 + sinf(angle) * sunRadius,
         cz
     };
     Vector3 moonPos = {
         cx - cosf(angle) * moonRadius,
-        cy - sinf(angle) * moonRadius,
+        64 - sinf(angle) * moonRadius,
         cz
     };
 
@@ -282,61 +332,11 @@ void DrawSun(Vector3 *position, Time *t, Model sunModel, Model moonModel){
 
 void UpdatePlayerStats(Player *player){
 	
-	int move = (int)GetMouseWheelMove();
+	int move = -(int)GetMouseWheelMove();
     if (move != 0) {
 		int newSlot = player->selectedSlotItemBar + move;
 		player -> selectedSlotItemBar = (newSlot % ITEM_BAR_SIZE + ITEM_BAR_SIZE) % ITEM_BAR_SIZE;
 	}
-}
-
-void Printplayer(Player *player, Game *game, char f){
-	char char_dir[128];
-	sprintf(char_dir, "View direction: %f / %f / %f\n", player->lookDir.x, player->lookDir.y, player->lookDir.z);
-	DrawText(char_dir, 10, 50, FONT_SIZE, WHITE);
-	
-	/*char char_global_chunk[128];
-	sprintf(char_global_chunk, "Chunks[O] X:%d / Z:%d\n", ((int)player->camera.position.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE, ((int)player->camera.position.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE);
-	DrawText(char_global_chunk, 10, 150, FONT_SIZE, WHITE);	*/
-	
-	char char_xp[128];
-	sprintf(char_xp, "Level XP: %d / XP Bar: %d%\n", player->xp, player->xpBar * 3.125);
-	DrawText(char_xp, 10, 70, FONT_SIZE, WHITE);	
-	
-	char char_heal[128];
-	sprintf(char_heal, "Heal: %d%\n", player->heal * 5);
-	DrawText(char_heal, 10, 90, FONT_SIZE, WHITE);	
-	
-	char char_hungry[128];
-	sprintf(char_hungry, "Hungry: %d%\n", player->hungry * 5);
-	DrawText(char_hungry, 10, 110, FONT_SIZE, WHITE);
-	
-	char char_slotItemBar[128];
-	sprintf(char_slotItemBar, "Slot Item Bar: %d\n", player->selectedSlotItemBar);
-	DrawText(char_slotItemBar, 10, 130, FONT_SIZE, WHITE);
-	
-	// Global game's variables
-	DrawText("Global game's variables:\n", WIDTH - 
-				(MeasureText("Global game's variables:", FONT_SIZE) + 10), 30, FONT_SIZE, WHITE);
-		char char_tick[1024];
-		sprintf(char_tick, "Total Ticks: %lld / Phase: %.2f\n"
-							"Day: %d / Dailytime: %d", 
-							game->time.totTicks, (float)game->time.timeOfDay / (float)TICKS_PER_DAY,
-							(int)game->time.totTicks / TICKS_PER_DAY, (int)game->time.totTicks % TICKS_PER_DAY); 
-		DrawText(char_tick, WIDTH - 
-					(MeasureText(char_tick, FONT_SIZE) + 10), 50, FONT_SIZE, WHITE);
-		
-	// Temporary variables
-	DrawText("Tmp Variables from the player:\n", WIDTH - 
-				(MeasureText("Tmp Variables from the player:", FONT_SIZE) + 10), 90, FONT_SIZE, WHITE);
-		if(player->isInWater) DrawText("In water, ", WIDTH - 
-			(MeasureText("In water, ", FONT_SIZE) + 10), 110, FONT_SIZE, WHITE);
-		else DrawText("Not in water, ", WIDTH - 
-			(MeasureText("Not in water, ", FONT_SIZE) + 10), 110, FONT_SIZE, WHITE);
-		
-		if(player->isTakingDamage) DrawText("Taking damage (<1s ago)", WIDTH - 
-			(MeasureText("Taking damage (<1s ago", FONT_SIZE) + 10), 130, FONT_SIZE, WHITE);
-		else DrawText("No damage (<1s ago)\n", WIDTH - 
-			(MeasureText("No damage (<1s ago)", FONT_SIZE) + 10), 130, FONT_SIZE, WHITE);
 }
 
 void UpdateCustomCamera(struct CustomCamera *cam, float dt){
@@ -621,7 +621,7 @@ void BuildTree(Chunk *c, int x, int y, int z){
 }
 
 char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int gy, int gz){
-    if(gy < 0 || gy >= CHUNK_HEIGTH) return 0;
+    if(gy < 0 || gy >= CHUNK_HEIGTH) return AIR;
 	
 	int chunkX = gx >> 4; // Sarebbe come dividere per 16, anche per numeri negativi
 	int chunkZ = gz >> 4;
@@ -716,7 +716,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
         for(int y = 0; y < CHUNK_HEIGTH; y++){
             for(int z = 0; z < CHUNK_SIZE; z++){  
                 
-				if(c->Map[x][y][z] == 0) continue;
+				if(c->Map[x][y][z] == AIR) continue;
                 
 				int globalX = (gX * CHUNK_SIZE) + x;
 				int globalZ = (gZ * CHUNK_SIZE) + z;
@@ -733,9 +733,10 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
 				else if(c->Map[x][y][z] == BADROCK){ textureID = 17; } // badrock
 				else if(c->Map[x][y][z] == LEAF){ textureID = 52; } // foglie
 				else if(c->Map[x][y][z] == LOG){ textureID = 20; } // tronco
-                		
+                
+				char neighbor = (y == CHUNK_HEIGTH - 1) ? AIR : c->Map[x][y+1][z];				
 				//Upper Face
-                if(y == CHUNK_HEIGTH - 1 || c->Map[x][y+1][z] == 0){
+                if(neighbor == AIR  || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 1.0f;
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f;
@@ -757,8 +758,9 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; 
                     iCount += 6;
                 }
-                //Under Face                
-                if(y == 0 || c->Map[x][y-1][z] == 0){
+                //Under Face    
+				neighbor = (y == 0) ? AIR : c->Map[x][y-1][z];
+				if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -781,7 +783,8 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     iCount += 6;
                 }                
                 //DX Face ->
-                if(x == CHUNK_SIZE - 1 ? GetBlockGlobal(world, globalX + 1, y, globalZ) == 0 : c->Map[x + 1][y][z] == 0){
+				neighbor = (x == CHUNK_SIZE - 1) ? GetBlockGlobal(world, globalX + 1, y, globalZ) : c->Map[x + 1][y][z];
+                if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; // Top-Left
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; // Bottom-Left
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; // Top-Right
@@ -798,7 +801,8 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //SX Face <-
-                if(x == 0 ? GetBlockGlobal(world, globalX - 1, y, globalZ) == 0 : c->Map[x - 1][y][z] == 0){
+				neighbor = (x == 0) ? GetBlockGlobal(world, globalX - 1, y, globalZ) : c->Map[x - 1][y][z];
+                if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -815,7 +819,8 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //BACK Face
-                if(z == CHUNK_SIZE - 1 ? GetBlockGlobal(world, globalX, y, globalZ + 1) == 0 : c->Map[x][y][z + 1] == 0){
+				neighbor = (z == CHUNK_SIZE - 1) ? GetBlockGlobal(world, globalX, y, globalZ + 1) : c->Map[x][y][z + 1];
+                if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; 
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; 
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f; 
@@ -832,7 +837,8 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //FRONT Face
-                if(z == 0 ? GetBlockGlobal(world, globalX, y, globalZ - 1) == 0 : c->Map[x][y][z - 1] == 0){
+				neighbor = (z == 0) ? GetBlockGlobal(world, globalX, y, globalZ - 1) : c->Map[x][y][z - 1];
+                if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f; 
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f; 
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; 
@@ -1020,8 +1026,7 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 }
 
 void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D fnTerrain){
-	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
-	memcpy(world, game->world, sizeof(world));
+	Chunk (*world)[LOCAL_WORLD_SIZE] = game->world;
 	for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
         for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
             // Coordinate globali del chunk desiderato
@@ -1148,10 +1153,170 @@ int IsInRange(Player *player, Game *game, int wx, int wz){
 }
 
 Color GetSkyColor(int t){ // https://minecraft.wiki/w/Daylight_cycle#Daytime
-	if(t < 12000) return SKY_DAY; 
-	else if(t >= 12000 && t < 13000) return SKY_SUNRISE;
-	else if(t >= 13000 && t < 23000) return SKY_NIGHT;
-	else return SKY_SUNSET;
+	if(t < 11500) return SKY_DAY; 
+	else if(t < 12500) return ColorLerp(SKY_DAY, SKY_SUNSET, (t - 11500) / 1000.0f);
+	else if(t < 13500) return ColorLerp(SKY_SUNSET, SKY_NIGHT, (t - 12500) / 1000.0f);
+	else if(t < 22500) return SKY_NIGHT;
+	else if(t < 23500) return ColorLerp(SKY_NIGHT, SKY_SUNRISE, (t - 22500) / 1000.0f);
+	else return ColorLerp(SKY_SUNRISE, SKY_DAY, (t - 23500) / 1000.0f);
+}
+
+bool BoxColliderWorld(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], BoundingBox *b){
+	const float exp_bug = 1e-4f;
+	int minX = (int)(floorf) (b->min.x + exp_bug);
+	int maxX = (int)(floorf) (b->max.x - exp_bug);
+	int minY = (int)(floorf) (b->min.y + exp_bug);
+	int maxY = (int)(floorf) (b->max.y - exp_bug);
+	int minZ = (int)(floorf) (b->min.z + exp_bug);
+	int maxZ = (int)(floorf) (b->max.z - exp_bug);
+	
+    for(int x = minX; x <= maxX; x++){
+        for(int y = minY; y <= maxY; y++){
+            for(int z = minZ; z <= maxZ; z++){
+                char id = GetBlockGlobal(world, x, y, z);
+                if(id != AIR && id != WATER) return true;
+            }
+        }
+    }
+	
+	return false;
+}
+
+void TryMoveAxis(Player *p, Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 delta){
+    Vector3 tryPos = Vector3Add(p->position, delta);
+	BoundingBox b = PosToBox(&tryPos);
+    if(!BoxColliderWorld(world, &b)){
+        p->position = tryPos;
+        return;
+    }
+
+    if(delta.y != 0.0f){
+        if(delta.y < 0.0f) p->isOnGround = true;
+        p->velocity.y = 0.0f;
+    }
+}
+
+void UpdatePlayer(Game *game, Player *p, float dt){
+	if(dt > 0.05f) dt = 0.05f;
+
+	// MOUSE LOOK
+	Vector2 md = GetMouseDelta();
+	p->view.yaw   -= md.x * p->view.sensitivity;
+	p->view.pitch -= md.y * p->view.sensitivity;
+	if(p->view.pitch >  89.0f) p->view.pitch =  89.0f;
+	if(p->view.pitch < -89.0f) p->view.pitch = -89.0f;
+
+	Vector3 forward = Vector3Normalize((Vector3){
+		cosf(DEG2RAD * p->view.pitch) * sinf(DEG2RAD * p->view.yaw),
+		sinf(DEG2RAD * p->view.pitch),
+		cosf(DEG2RAD * p->view.pitch) * cosf(DEG2RAD * p->view.yaw)
+	});
+
+	// direzione di camminata: orizzontale, senza la componente Y
+	Vector3 flat  = Vector3Normalize((Vector3){ forward.x, 0.0f, forward.z });
+	Vector3 right = Vector3Normalize(Vector3CrossProduct(flat, (Vector3){0.0f, 1.0f, 0.0f}));
+
+	// WASD -> direzione desiderata
+	Vector3 moveDir = {0};
+	if(IsKeyDown(KEY_W)) moveDir = Vector3Add(moveDir, flat);
+	if(IsKeyDown(KEY_S)) moveDir = Vector3Subtract(moveDir, flat);
+	if(IsKeyDown(KEY_D)) moveDir = Vector3Add(moveDir, right);
+	if(IsKeyDown(KEY_A)) moveDir = Vector3Subtract(moveDir, right);
+	if(Vector3Length(moveDir) > 0.0f) moveDir = Vector3Normalize(moveDir);
+
+	float speed = IsKeyDown(KEY_LEFT_CONTROL) ? PLAYER_SPEED * 2.0f : PLAYER_SPEED;
+
+	// SALTO E GRAVITA
+	if(IsKeyPressed(KEY_F)) p->isFlying = !p->isFlying;
+
+	float dy;
+	if(p->isFlying){
+		p->velocity.y = 0.0f;
+		dy = 0.0f;
+		if(IsKeyDown(KEY_SPACE))      dy +=  speed * dt;
+		if(IsKeyDown(KEY_LEFT_SHIFT)) dy -=  speed * dt;
+	} else {
+		if(p->isOnGround && IsKeyPressed(KEY_SPACE)) p->velocity.y = JUMP_SPEED;
+		p->velocity.y -= GRAVITY * dt;
+		dy = p->velocity.y * dt;
+	}
+
+	p->isOnGround = 0;
+	TryMoveAxis(p, game->world, (Vector3){ moveDir.x * speed * dt, 0.0f, 0.0f });
+	TryMoveAxis(p, game->world, (Vector3){ 0.0f, 0.0f, moveDir.z * speed * dt });
+	TryMoveAxis(p, game->world, (Vector3){ 0.0f, dy, 0.0f });
+
+	// DERIVATE
+	p->playerBox = PosToBox(&p->position);
+	p->isCollisioning = BoxColliderWorld(game->world, &p->playerBox);
+	p->lookDir = forward;
+
+	p->camera.position = (Vector3){ p->position.x,
+									p->position.y + PLAYER_EYE,
+									p->position.z };
+	p->camera.target = Vector3Add(p->camera.position, forward);
+}
+
+void Printplayer(Player *player, Game *game, char f){
+	char char_dir[128];
+	sprintf(char_dir, "View direction: %f / %f / %f\n", player->lookDir.x, player->lookDir.y, player->lookDir.z);
+	DrawText(char_dir, 10, 50, FONT_SIZE, WHITE);
+	
+	/*char char_global_chunk[128];
+	sprintf(char_global_chunk, "Chunks[O] X:%d / Z:%d\n", ((int)player->camera.position.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE, ((int)player->camera.position.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE);
+	DrawText(char_global_chunk, 10, 150, FONT_SIZE, WHITE);	*/
+	
+	char char_xp[128];
+	sprintf(char_xp, "Level XP: %d / XP Bar: %d%\n", player->xp, player->xpBar * 3.125);
+	DrawText(char_xp, 10, 70, FONT_SIZE, WHITE);	
+	
+	char char_heal[128];
+	sprintf(char_heal, "Heal: %d%\n", player->heal * 5);
+	DrawText(char_heal, 10, 90, FONT_SIZE, WHITE);	
+	
+	char char_hungry[128];
+	sprintf(char_hungry, "Hungry: %d%\n", player->hungry * 5);
+	DrawText(char_hungry, 10, 110, FONT_SIZE, WHITE);
+	
+	char char_slotItemBar[128];
+	sprintf(char_slotItemBar, "Slot Item Bar: %d\n", player->selectedSlotItemBar);
+	DrawText(char_slotItemBar, 10, 130, FONT_SIZE, WHITE);
+
+	char char_collision[128];
+	sprintf(char_collision, "Collisioning: %s\n", player->isCollisioning ? "true" : "false");
+	DrawText(char_collision, 10, 150, FONT_SIZE, WHITE);
+
+	char char_fly[128];
+	sprintf(char_fly, "Flying: %s\n", player->isFlying ? "true" : "false");
+	DrawText(char_fly, 10, 170, FONT_SIZE, WHITE);
+	
+	char char_ground[128];
+	sprintf(char_ground, "On Ground: %s\n", player->isOnGround ? "true" : "false");
+	DrawText(char_ground, 10, 190, FONT_SIZE, WHITE);
+
+	// Global game's variables
+	DrawText("Global game's variables:\n", WIDTH * 0.75, 30, FONT_SIZE, WHITE);
+		char char_tick[1024];
+		sprintf(char_tick, "Total Ticks: %lld / Phase: %.2f\n"
+							"Day: %d / Dailytime: %d", 
+							game->time.totTicks, (float)game->time.timeOfDay / (float)TICKS_PER_DAY,
+							(int)game->time.totTicks / TICKS_PER_DAY, (int)game->time.totTicks % TICKS_PER_DAY); 
+		DrawText(char_tick, WIDTH * 0.75, 50, FONT_SIZE, WHITE);
+		
+	// Temporary variables
+	char char_tmp[1024];
+	sprintf(char_tmp, "Tmp Var: In water = %d, Taking damage = %d", 
+				player->isInWater, player->isTakingDamage);
+	DrawText(char_tmp, WIDTH * 0.75, 90, FONT_SIZE, WHITE);
+	
+	// CLOCK
+	char char_clock[5];
+	int timeOfDay = game->time.timeOfDay;
+	int hours = timeOfDay / 1000;
+	int min_k = timeOfDay % 1000;
+	int min = 60 * min_k / 1000;
+	sprintf(char_clock, "%d:%d", hours, min);
+	DrawText(char_clock, (WIDTH / 2) - MeasureText(char_clock, 40), 10, 40, WHITE);  
 }
 
 int main(){
@@ -1162,60 +1327,44 @@ int main(){
 	Texture2D gui = LoadTexture("atlas_gui.png");
 	Texture2D ascii = LoadTexture("atlas_ascii.png");
 	Texture2D cielo = LoadTexture("atlas_celestials.png");
-	
+
 	Model sunModel = BuildModel(cielo, 400, 175, 47, 8, 8);
 	Model moonModel = BuildModel(cielo, 400, 79, 13, 8, 8);
 	
-    //CAMERA
+
+    // Initialize World, Texture Inventary, Player
 	Player *player = (Player*)malloc(sizeof(Player));
 	InitPlayer(player);
-	Camera3D *camera = &player->camera;
-    *camera = (Camera3D){0.0f, 50.0f, 0.0f, 
-                       9.0f, 3.0f, 0.0f,
-                       0.0f, 1.0f, 0.0f,
-                       60.0f,
-                       CAMERA_PERSPECTIVE};
-	
-    int chunkPlayerX = (int) floorf(camera->position.x / CHUNK_SIZE); 
-    int chunkPlayerZ = (int) floorf(camera->position.z / CHUNK_SIZE); 
+
+	int chunkPlayerX = (int)floorf(player->position.x / CHUNK_SIZE);
+	int chunkPlayerZ = (int)floorf(player->position.z / CHUNK_SIZE);
 
     int lastChunkPlayerX = chunkPlayerX;
     int lastChunkPlayerZ = chunkPlayerZ;
-    
-	// Custom Camera
-	struct CustomCamera *myCam = (struct CustomCamera*)malloc(sizeof(struct CustomCamera));;
-	*myCam = (struct CustomCamera){(Camera3D*)camera, 10.0f, 50.0f, -10.0f,
-						180.0f, 0.0f, 5.0f, 0.15};
+
 	
-    // Build Initialize World 
 	Game *game = (Game*)malloc(sizeof(Game));
 	InizializeWorld(game, chunkPlayerX, chunkPlayerZ, fnTerrain);
 	InitWorldTime(&game->time);
-
-
-	// Init Texture Inventary blocks
 	InitTextureInventary(fnTerrain, player);
-	
+		
     SetTargetFPS(540); 
     DisableCursor();
 	char textCordinates[128];
-    float dt; Vector3 velocityPlayer = {0};
+    float dt = {0};
     while(!WindowShouldClose()){
-		//GRAVITY
 		dt = GetFrameTime();
-		velocityPlayer.y -= GRAVITY * dt;
-		camera->position.y += velocityPlayer.y * dt;
-		
+
 		// TIME
 		UpgradeTime(&game->time, dt);
 		
-		//CAMERA
-        UpdateCustomCamera(myCam, dt);
-		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f", camera->position.x, camera->position.y, camera->position.z);
-		player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
-
+		// PLAYER CAMERA
+        UpdatePlayer(game, player, dt);
+		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f | ground %d",
+				player->position.x, player->position.y, player->position.z, player->isOnGround);
 		
-		BuildChunk(game->world, camera->position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
+		
+		BuildChunk(game->world, player->position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
 
 		// Sarebbe da fare i Command check
 		if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
@@ -1225,11 +1374,16 @@ int main(){
 			PlaceBlockRay(player, game, fnTerrain);
 		}		
 
-		
+		//if(IsKeyDown(KEY_G)) TryMoveAxis(player, game->world, (Vector3){0, -2.0f * dt, 0});
+		if(IsKeyDown(KEY_G)){ 
+			DrawText("G PREMUTO", 10, 200, FONT_SIZE, RED);
+			TryMoveAxis(player, game->world, (Vector3){0, -2.0f * dt, 0});
+		}
+
         BeginDrawing();
             ClearBackground(GetSkyColor(game->time.timeOfDay));
 			
-            BeginMode3D(*(myCam->camera));
+            BeginMode3D(player->camera);
             	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
 						if(IsInRange(player, game, wx, wz)){
@@ -1238,7 +1392,8 @@ int main(){
 					}
     			}   
 			DrawSun(&player->camera.position, &game->time, sunModel, moonModel);
-
+			
+			if(IsKeyDown(KEY_F3)){ DrawBoundingBox(player->playerBox, RED);}
 			EndMode3D();
 			
 			DrawFPS(10, 10);
@@ -1246,9 +1401,11 @@ int main(){
 			UpdatePlayerStats(player);
 			DrawGUI(gui, ascii, player);
 			
-			if(IsKeyDown(KEY_F3)) Printplayer(player, game, 0);
+			if(IsKeyDown(KEY_F3)){ Printplayer(player, game, 0); }
         EndDrawing();
     }
+	
+	// UNLOAD FEATURES
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
       		UnloadModel(game->world[wx][wz].model);
@@ -1269,6 +1426,5 @@ int main(){
 	
 	free(player);
 	free(game);
-	free(myCam);
     return 0;
 }
