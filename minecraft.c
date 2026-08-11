@@ -51,7 +51,7 @@
 
 #define HEIGHT_GROUND 110
 
-#define LOCAL_WORLD_SIZE 7
+#define LOCAL_WORLD_SIZE 9
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
 // PLAYER
@@ -89,16 +89,17 @@ unsigned short temp_indici[MAX_CHUNK_FACES * 6];
 float temp_texcoords[MAX_CHUNK_FACES * 4 * 2];
 
 enum BlockType {
-	AIR 	= 0,
-	SAND 	= 1,
-	DIRT 	= 2,
-	GRASS 	= 3,
-	ROCK 	= 4,
-	WATER 	= 5,
-	SNOW 	= 6,
-	BADROCK = 7,
-	LEAF 	= 8,
-	LOG 	= 9,
+	AIR 		= 0,
+	SAND 		= 1,
+	DIRT 		= 2,
+	GRASS 		= 3,
+	ROCK 		= 4,
+	WATER 		= 5,
+	SNOW 		= 6,
+	BADROCK 	= 7,
+	LEAF 		= 8,
+	LOG 		= 9,
+	LEAF_OPAQUE = 10,
 	MAX_BLOCK_TYPES
 };
 
@@ -121,6 +122,8 @@ typedef struct Chunk{
 typedef struct Game{
 	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
 	Time time;
+	int mode  	 : 1; // CREATIVE (0)/ SURVIVOL(1)
+	int opt_mode : 1; // FAST (0)/ NORMAL (1)
 }Game;
 
 typedef struct CameraController{
@@ -168,7 +171,8 @@ typedef struct CustomCamera{
 
 const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
 			[AIR]  =   0, [SAND] = 18, [DIRT] 	=  2, [GRASS]= 3, [ROCK]= 1,
-			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =52, [LOG] =20
+			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =53, [LOG] =20,
+			[LEAF_OPAQUE] = 54
 };
 
 void InitPlayer(struct Player *p){
@@ -753,7 +757,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 */
 				char neighbor = (y == CHUNK_HEIGTH - 1) ? AIR : c->Map[x][y+1][z];				
 				//Upper Face
-                if(neighbor == AIR  || neighbor == LEAF){
+                if(neighbor == AIR /* || neighbor == LEAF*/){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 1.0f;
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f;
@@ -777,7 +781,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //Under Face    
 				neighbor = (y == 0) ? AIR : c->Map[x][y-1][z];
-				if(neighbor == AIR || neighbor == LEAF){
+				if(neighbor == AIR/* || neighbor == LEAF*/){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -801,7 +805,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }                
                 //DX Face ->
 				neighbor = (x == CHUNK_SIZE - 1) ? GetBlockForMesh(world, globalX + 1, y, globalZ) : c->Map[x + 1][y][z];
-                if(neighbor == AIR || neighbor == LEAF){
+                if(neighbor == AIR/* || neighbor == LEAF*/){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; // Top-Left
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; // Bottom-Left
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; // Top-Right
@@ -819,7 +823,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //SX Face <-
 				neighbor = (x == 0) ? GetBlockForMesh(world, globalX - 1, y, globalZ) : c->Map[x - 1][y][z];
-                if(neighbor == AIR || neighbor == LEAF){
+                if(neighbor == AIR/* || neighbor == LEAF*/){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -837,7 +841,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //BACK Face
 				neighbor = (z == CHUNK_SIZE - 1) ? GetBlockForMesh(world, globalX, y, globalZ + 1) : c->Map[x][y][z + 1];
-                if(neighbor == AIR || neighbor == LEAF){
+                if(neighbor == AIR/* || neighbor == LEAF*/){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; 
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; 
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f; 
@@ -855,7 +859,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //FRONT Face
 				neighbor = (z == 0) ? GetBlockForMesh(world, globalX, y, globalZ - 1) : c->Map[x][y][z - 1];
-                if(neighbor == AIR || neighbor == LEAF){
+                if(neighbor == AIR/* || neighbor == LEAF*/){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f; 
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f; 
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; 
@@ -1049,7 +1053,19 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 	}
 }
 
+void InitWorldTime(Time *wt){
+    wt->totTicks  = 0;
+    wt->timeOfDay   = 0;
+    wt->accumulator = 0.0f;
+	wt->dailyPhase = 0;
+}
+
 void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D fnTerrain){
+	
+	InitWorldTime(&game->time);
+	game -> mode = 0;
+	game -> opt_mode = 0;
+	
 	Chunk (*world)[LOCAL_WORLD_SIZE] = game->world;
 	for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
         for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
@@ -1074,13 +1090,6 @@ void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D f
             world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
         }
     }
-}
-
-void InitWorldTime(Time *wt){
-    wt->totTicks  = 0;
-    wt->timeOfDay   = 0;
-    wt->accumulator = 0.0f;
-	wt->dailyPhase = 0;
 }
 
 void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
@@ -1365,7 +1374,6 @@ int main(){
 	
 	Game *game = (Game*)malloc(sizeof(Game));
 	InizializeWorld(game, chunkPlayerX, chunkPlayerZ, fnTerrain);
-	InitWorldTime(&game->time);
 	InitTextureInventary(fnTerrain, player);
 		
     SetTargetFPS(540); 

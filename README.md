@@ -5,7 +5,7 @@
 gcc -o minecraft.exe minecraft.c -lraylib -lgdi32 -lwinmm
 ```
 ```
-.\minecraft.exe.
+.\minecraft.exe
 ```
 
 ### Linux run/compile
