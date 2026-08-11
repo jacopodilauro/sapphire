@@ -8,6 +8,7 @@
  [] gravità e il salto	 																|
  [x] inseriamo il sole, luna, alberi, montagne											|
  [] inseriamo la terza persona e prima persona. 										|
+ [] sezioni																				|
 */
 
 #include <raylib.h>
@@ -30,7 +31,7 @@
 #define WIDTH 1800
 #define HEIGHT 1200
 
-#define GRAVITY 12
+#define GRAVITY 28
 
 // GUI
 #define GUI_SCALE 5
@@ -57,8 +58,8 @@
 #define PLAYER_WIDTH   0.6f
 #define PLAYER_HEIGHT  1.8f
 #define PLAYER_EYE 	   1.6f
-#define PLAYER_SPEED   5.0f
-#define JUMP_SPEED     5.0f
+#define PLAYER_SPEED   4.3f
+#define JUMP_SPEED     8.4f
 
 #define SENS_MOUSE 	  0.15f
 
@@ -1285,10 +1286,6 @@ void Printplayer(Player *player, Game *game, char f){
 	sprintf(char_dir, "View direction: %f / %f / %f\n", player->lookDir.x, player->lookDir.y, player->lookDir.z);
 	DrawText(char_dir, 10, 50, FONT_SIZE, WHITE);
 	
-	/*char char_global_chunk[128];
-	sprintf(char_global_chunk, "Chunks[O] X:%d / Z:%d\n", ((int)player->camera.position.x % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE, ((int)player->camera.position.z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE);
-	DrawText(char_global_chunk, 10, 150, FONT_SIZE, WHITE);	*/
-	
 	char char_xp[128];
 	sprintf(char_xp, "Level XP: %d / XP Bar: %d%\n", player->xp, player->xpBar * 3.125);
 	DrawText(char_xp, 10, 70, FONT_SIZE, WHITE);	
@@ -1345,11 +1342,11 @@ void Printplayer(Player *player, Game *game, char f){
 int main(){
     
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
-    Texture2D fnTerrain = LoadTexture("atlas_terrain.png");
+    Texture2D fnTerrain = LoadTexture("atlas/atlas_terrain.png");
     SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
-	Texture2D gui = LoadTexture("atlas_gui.png");
-	Texture2D ascii = LoadTexture("atlas_ascii.png");
-	Texture2D cielo = LoadTexture("atlas_celestials.png");
+	Texture2D gui = LoadTexture("atlas/atlas_gui.png");
+	Texture2D ascii = LoadTexture("atlas/atlas_ascii.png");
+	Texture2D cielo = LoadTexture("atlas/atlas_celestials.png");
 
 	Model sunModel = BuildModel(cielo, 400, 175, 47, 8, 8);
 	Model moonModel = BuildModel(cielo, 400, 79, 13, 8, 8);
