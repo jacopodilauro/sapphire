@@ -1,4 +1,4 @@
-# MINECRAFT
+# EMERALD / MINECRAFT
 
 ### Windows run/compile
 ```
