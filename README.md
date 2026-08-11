@@ -1,19 +1,20 @@
 # MINECRAFT
 
-### Windows Run
+### Windows run/compile
+```
+gcc -o minecraft.exe minecraft.c -lraylib -lgdi32 -lwinmm
 
-Run `gcc -o minecraft.exe .\minecraft.c -lraylib -lgdi32 -lwinmm` to compile
+.\minecraft.exe.
+```
 
-and `.\minecraft.exe` to execute.
-
-### Linux Run
+### Linux run/compile
 
 ```bash
 gcc -o minecraft minecraft.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 ./minecraft
 ```
 
-### MacOS Run
+### MacOS run/compile
 
 ```bash
 gcc -o minecraft minecraft.c -lraylib -framework OpenGL -framework Cocoa -framework IOKit
