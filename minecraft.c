@@ -22,11 +22,15 @@
 #define TICKS_PER_DAY 24000
 #define TICK_RATE     200.0f
 
+#define DATA_PER_FRAME 2
+#define MESH_PER_FRAME 2
+
+#define GEN_QUEUE_SIZE 64
 // SCREEN
 #define WIDTH 1800
 #define HEIGHT 1200
 
-#define GRAVITY 25
+#define GRAVITY 12
 
 // GUI
 #define GUI_SCALE 5
@@ -54,7 +58,7 @@
 #define PLAYER_HEIGHT  1.8f
 #define PLAYER_EYE 	   1.6f
 #define PLAYER_SPEED   5.0f
-#define JUMP_SPEED     8.0f
+#define JUMP_SPEED     5.0f
 
 #define SENS_MOUSE 	  0.15f
 
@@ -62,10 +66,6 @@
 #define MAX_RAY_DISTANCE 6
 #define STEP_RAY_SIZE 0.05
 
-#define GEN_QUEUE_SIZE 64
-
-int HEIGHTGROUND;
-int WATER_LEVEL;
 // Mesh Generation Queue
 int genQueueGX[GEN_QUEUE_SIZE];   
 int genQueueGZ[GEN_QUEUE_SIZE];   
@@ -87,6 +87,20 @@ float temp_vertici[MAX_CHUNK_FACES * 4 * 3];
 unsigned short temp_indici[MAX_CHUNK_FACES * 6];
 float temp_texcoords[MAX_CHUNK_FACES * 4 * 2];
 
+enum BlockType {
+	AIR 	= 0,
+	SAND 	= 1,
+	DIRT 	= 2,
+	GRASS 	= 3,
+	ROCK 	= 4,
+	WATER 	= 5,
+	SNOW 	= 6,
+	BADROCK = 7,
+	LEAF 	= 8,
+	LOG 	= 9,
+	MAX_BLOCK_TYPES
+};
+
 typedef struct Time{
     long long totTicks;
     int   timeOfDay;
@@ -107,20 +121,6 @@ typedef struct Game{
 	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
 	Time time;
 }Game;
-
-enum BlockType {
-	AIR 	= 0,
-	SAND 	= 1,
-	DIRT 	= 2,
-	GRASS 	= 3,
-	ROCK 	= 4,
-	WATER 	= 5,
-	SNOW 	= 6,
-	BADROCK = 7,
-	LEAF 	= 8,
-	LOG 	= 9,
-	MAX_BLOCK_TYPES
-};
 
 typedef struct CameraController{
 	float yaw;
@@ -165,6 +165,11 @@ typedef struct CustomCamera{
 	float ds; // sensibilità
 }CustomCamera;
 
+const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
+			[AIR]  =   0, [SAND] = 18, [DIRT] 	=  2, [GRASS]= 3, [ROCK]= 1,
+			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =52, [LOG] =20
+};
+
 void InitPlayer(struct Player *p){
 	p->position = (Vector3){ 0.0f, 50.0f, 0.0f };
 	p->velocity = (Vector3){0};
@@ -189,13 +194,7 @@ void InitPlayer(struct Player *p){
     p->selectedSlotItemBar = 0;
     p->isInWater = 0;
     p->isTakingDamage = 0;
-	/*p->position = (Vector3){ p->camera.position.x,
-							 p->camera.position.y - PLAYER_EYE,
-							 p->camera.position.z };
-	p->velocity = (Vector3){ 0 };
-	p->isOnGround = 0;
-	p->isCollisioning = 0;*/
-	//for(int i = 0; i < 9; i++){ p->blocksInHand[i] = GRASS;}
+
 	p->blocksInHand[0] = GRASS;
 	p->blocksInHand[1] = AIR;
 	p->blocksInHand[2] = SAND;
@@ -506,7 +505,7 @@ void GetCoordinatesFromAtlas(int textureID, int vertexID, float *u_out, float *v
 	if(vertexID == 3) { *u_out = topX + img_percent_width; 	*v_out = topY + img_percent_height; } 
 }
 
-Model BuildItemModel(int blockType) {
+Model BuildItemModel(int block) {
     Mesh mesh = {0};
     mesh.vertexCount = 24;
     mesh.triangleCount = 12;
@@ -515,7 +514,8 @@ Model BuildItemModel(int blockType) {
     mesh.texcoords = (float*)malloc(mesh.vertexCount * 2 * sizeof(float));
 
     int vCount = 0, iCount = 0, tCount = 0;
-    int textureID = AIR;
+	int textureID = BLOCK_TEXTURE[(int) block];
+    /*int textureID = AIR;
     if(blockType == SAND){ textureID = 18; }
     else if(blockType == DIRT){ textureID = 2; }
     else if(blockType == GRASS){ textureID = 3; }
@@ -524,7 +524,7 @@ Model BuildItemModel(int blockType) {
     else if(blockType == SNOW){ textureID = 66; }
     else if(blockType == BADROCK){ textureID = 17; }
     else if(blockType == LEAF){ textureID = 52; }
-    else if(blockType == LOG){ textureID = 20; }
+    else if(blockType == LOG){ textureID = 20; }*/
 
     // Veritci coordinates for a (-0.5 0.5) cube
     const float facce[6][4][3] = {
@@ -556,8 +556,8 @@ Model BuildItemModel(int blockType) {
         iCount += 6;
 
         int tmpFaceID = textureID;
-        if(blockType == GRASS && f == 0) tmpFaceID = 0;
-        if(blockType == GRASS && f == 1) tmpFaceID = 2;
+        if(block == GRASS && f == 0) tmpFaceID = 0;
+        if(block == GRASS && f == 1) tmpFaceID = 2;
 
         for(int nVer = 0; nVer < 4; nVer++){
             float u, v;
@@ -620,8 +620,15 @@ void BuildTree(Chunk *c, int x, int y, int z){
     }
 }
 
-char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int gy, int gz){
-    if(gy < 0 || gy >= CHUNK_HEIGTH) return AIR;
+/*
+ * 
+ *	BuildChunkMesh   "devo disegnare questa faccia?" pieno — non la disegno
+ *	BoxColliderWorld "ci sbatto contro?"	aria — non ci sbatti
+ *	Delete/PlaceBlockRay "il raggio ha colpito qualcosa?"	aria — non hai colpito
+*/
+char GetBlockMain(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int gy, int gz, char OUT){
+    if(gy >= CHUNK_HEIGTH) 	return AIR;
+    if(gy < 0) 				return OUT;
 	
 	int chunkX = gx >> 4; // Sarebbe come dividere per 16, anche per numeri negativi
 	int chunkZ = gz >> 4;
@@ -630,7 +637,7 @@ char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int
     int wz = (chunkZ % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
 	
 	if (world[wx][wz].gridX != chunkX || world[wx][wz].gridZ != chunkZ) {
-        return 0; 
+        return OUT; 
     }
 	
 	int lx = gx & 15; // Identico a %16 anche con negativi 
@@ -639,7 +646,17 @@ char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int
 	return world[wx][wz].Map[lx][gy][lz];
 }
 
+char GetBlockGlobal(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int gy, int gz){
+	return GetBlockMain(world, gx, gy, gz, AIR);
+}
+
+static char GetBlockForMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int gx, int gy, int gz){
+	return GetBlockMain(world, gx, gy, gz, ROCK);
+}
+
 void BuildChunkData(Chunk *c, int gX, int gZ){
+	int HEIGHTGROUND;
+	int WATER_LEVEL;
 	c->gridX = gX;
 	c->gridZ = gZ;
 	c->position = (Vector3){gX * CHUNK_SIZE, 0.0f, gZ * CHUNK_SIZE};
@@ -715,16 +732,15 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
     for(int x = 0; x < CHUNK_SIZE; x++){
         for(int y = 0; y < CHUNK_HEIGTH; y++){
             for(int z = 0; z < CHUNK_SIZE; z++){  
-                
-				if(c->Map[x][y][z] == AIR) continue;
+			
+                char block = c->Map[x][y][z];
+				if(block == AIR) continue;
                 
 				int globalX = (gX * CHUNK_SIZE) + x;
 				int globalZ = (gZ * CHUNK_SIZE) + z;
-				
-				
-				
-                int textureID = AIR;
-                if(c->Map[x][y][z] == SAND){ textureID = 18; } //sabbia
+								
+                int textureID = BLOCK_TEXTURE[(int)block];
+                /*if(c->Map[x][y][z] == SAND){ textureID = 18; } //sabbia
                 else if(c->Map[x][y][z] == DIRT){ textureID = 2; } // terra
                 else if(c->Map[x][y][z] == GRASS){ textureID = 3; } // erba
                 else if(c->Map[x][y][z] == ROCK){ textureID = 1; } // roccia
@@ -733,7 +749,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
 				else if(c->Map[x][y][z] == BADROCK){ textureID = 17; } // badrock
 				else if(c->Map[x][y][z] == LEAF){ textureID = 52; } // foglie
 				else if(c->Map[x][y][z] == LOG){ textureID = 20; } // tronco
-                
+                */
 				char neighbor = (y == CHUNK_HEIGTH - 1) ? AIR : c->Map[x][y+1][z];				
 				//Upper Face
                 if(neighbor == AIR  || neighbor == LEAF){
@@ -783,7 +799,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     iCount += 6;
                 }                
                 //DX Face ->
-				neighbor = (x == CHUNK_SIZE - 1) ? GetBlockGlobal(world, globalX + 1, y, globalZ) : c->Map[x + 1][y][z];
+				neighbor = (x == CHUNK_SIZE - 1) ? GetBlockForMesh(world, globalX + 1, y, globalZ) : c->Map[x + 1][y][z];
                 if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; // Top-Left
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; // Bottom-Left
@@ -801,7 +817,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //SX Face <-
-				neighbor = (x == 0) ? GetBlockGlobal(world, globalX - 1, y, globalZ) : c->Map[x - 1][y][z];
+				neighbor = (x == 0) ? GetBlockForMesh(world, globalX - 1, y, globalZ) : c->Map[x - 1][y][z];
                 if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
@@ -819,7 +835,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //BACK Face
-				neighbor = (z == CHUNK_SIZE - 1) ? GetBlockGlobal(world, globalX, y, globalZ + 1) : c->Map[x][y][z + 1];
+				neighbor = (z == CHUNK_SIZE - 1) ? GetBlockForMesh(world, globalX, y, globalZ + 1) : c->Map[x][y][z + 1];
                 if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; 
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; 
@@ -837,7 +853,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                     vCount += 4; iCount += 6;
                 }
                 //FRONT Face
-				neighbor = (z == 0) ? GetBlockGlobal(world, globalX, y, globalZ - 1) : c->Map[x][y][z - 1];
+				neighbor = (z == 0) ? GetBlockForMesh(world, globalX, y, globalZ - 1) : c->Map[x][y][z - 1];
                 if(neighbor == AIR || neighbor == LEAF){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f; 
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f; 
@@ -857,6 +873,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
             }
 		}
 	}
+
 	//MESH - MODEL
     Mesh ChunkMesh = {0};
     Mesh *ptrMesh = &ChunkMesh;
@@ -875,7 +892,8 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
     UploadMesh(&ChunkMesh, false);
     
     //MODEL    
-    c -> model = LoadModelFromMesh(ChunkMesh);              
+    c -> model = LoadModelFromMesh(ChunkMesh); 
+	
 }
 
 Model BuildModel(Texture2D tex, float size, float cutX, float cutY, float cutW, float cutH) {
@@ -968,15 +986,16 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 	/*
 	 * I switch if -> while bc daa is fast and I wanna 
 	*/
-	while (dataHead != dataTail) {
+	int dataBudget = DATA_PER_FRAME;
+	while (dataHead != dataTail && dataBudget-- > 0) {
 		int wx = dataQueueWX[dataHead];
 		int wz = dataQueueWZ[dataHead];
 		int gx = dataQueueGX[dataHead];
 		int gz = dataQueueGZ[dataHead];
 		dataHead = (dataHead + 1) % GEN_QUEUE_SIZE;
-		
-		BuildChunkData(&world[wx][wz], gx, gz);
 
+		BuildChunkData(&world[wx][wz], gx, gz);
+	
 		genQueueGX[genTail] = gx;
 		genQueueGZ[genTail] = gz;
 		genQueueWX[genTail] = wx;
@@ -1003,23 +1022,27 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 		}
 	}
 	
-	if (genHead != genTail) {
+	int meshBudget = MESH_PER_FRAME;
+	if (genHead != genTail && meshBudget-- > 0) {
 		int wx = genQueueWX[genHead];
 		int wz = genQueueWZ[genHead];
 		int gx = genQueueGX[genHead];
 		int gz = genQueueGZ[genHead];
 		genHead = (genHead + 1) % GEN_QUEUE_SIZE;
+
 		BuildChunkMesh(world, &world[wx][wz], gx, gz);
+		
 		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
 	} /*else {*/
 			
-	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
-		for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
+	for (int wx = 0; wx < LOCAL_WORLD_SIZE && meshBudget > 0; wx++) {
+		for (int wz = 0; wz < LOCAL_WORLD_SIZE && meshBudget > 0; wz++) {
 			if (world[wx][wz].needRemesh) {
 				UnloadModel(world[wx][wz].model);
 				BuildChunkMesh(world, &world[wx][wz], world[wx][wz].gridX, world[wx][wz].gridZ);
 				world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
 				world[wx][wz].needRemesh = false;
+				meshBudget--;
 			}
 		}
 	}
@@ -1212,7 +1235,7 @@ void UpdatePlayer(Game *game, Player *p, float dt){
 		cosf(DEG2RAD * p->view.pitch) * cosf(DEG2RAD * p->view.yaw)
 	});
 
-	// direzione di camminata: orizzontale, senza la componente Y
+	// direzione di camminata: orizzontale, senza Y
 	Vector3 flat  = Vector3Normalize((Vector3){ forward.x, 0.0f, forward.z });
 	Vector3 right = Vector3Normalize(Vector3CrossProduct(flat, (Vector3){0.0f, 1.0f, 0.0f}));
 
@@ -1246,7 +1269,7 @@ void UpdatePlayer(Game *game, Player *p, float dt){
 	TryMoveAxis(p, game->world, (Vector3){ 0.0f, 0.0f, moveDir.z * speed * dt });
 	TryMoveAxis(p, game->world, (Vector3){ 0.0f, dy, 0.0f });
 
-	// DERIVATE
+	// SETTING
 	p->playerBox = PosToBox(&p->position);
 	p->isCollisioning = BoxColliderWorld(game->world, &p->playerBox);
 	p->lookDir = forward;
@@ -1302,7 +1325,7 @@ void Printplayer(Player *player, Game *game, char f){
 							game->time.totTicks, (float)game->time.timeOfDay / (float)TICKS_PER_DAY,
 							(int)game->time.totTicks / TICKS_PER_DAY, (int)game->time.totTicks % TICKS_PER_DAY); 
 		DrawText(char_tick, WIDTH * 0.75, 50, FONT_SIZE, WHITE);
-		
+	
 	// Temporary variables
 	char char_tmp[1024];
 	sprintf(char_tmp, "Tmp Var: In water = %d, Taking damage = %d", 
@@ -1362,8 +1385,7 @@ int main(){
         UpdatePlayer(game, player, dt);
 		sprintf(textCordinates, "XYZ: %.2f / %.2f / %.2f | ground %d",
 				player->position.x, player->position.y, player->position.z, player->isOnGround);
-		
-		
+
 		BuildChunk(game->world, player->position, &lastChunkPlayerX, &lastChunkPlayerZ, fnTerrain);
 
 		// Sarebbe da fare i Command check
@@ -1391,9 +1413,9 @@ int main(){
 						}
 					}
     			}   
-			DrawSun(&player->camera.position, &game->time, sunModel, moonModel);
-			
-			if(IsKeyDown(KEY_F3)){ DrawBoundingBox(player->playerBox, RED);}
+				
+				DrawSun(&player->camera.position, &game->time, sunModel, moonModel);			
+				if(IsKeyDown(KEY_F3)){ DrawBoundingBox(player->playerBox, RED);}
 			EndMode3D();
 			
 			DrawFPS(10, 10);
