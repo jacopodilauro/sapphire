@@ -26,7 +26,7 @@
 #define DATA_PER_FRAME 2
 #define MESH_PER_FRAME 2
 
-#define GEN_QUEUE_SIZE 64
+#define GEN_QUEUE_SIZE 128
 // SCREEN
 #define WIDTH 1800
 #define HEIGHT 1200
@@ -51,7 +51,7 @@
 
 #define HEIGHT_GROUND 110
 
-#define LOCAL_WORLD_SIZE 9
+#define LOCAL_WORLD_SIZE 17
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
 // PLAYER
@@ -1269,7 +1269,7 @@ void UpdatePlayer(Game *game, Player *p, float dt){
 		if(IsKeyDown(KEY_SPACE))      dy +=  speed * dt;
 		if(IsKeyDown(KEY_LEFT_SHIFT)) dy -=  speed * dt;
 	} else {
-		if(p->isOnGround && IsKeyPressed(KEY_SPACE)) p->velocity.y = JUMP_SPEED;
+		if(p->isOnGround && IsKeyDown(KEY_SPACE)) p->velocity.y = JUMP_SPEED;
 		p->velocity.y -= GRAVITY * dt;
 		dy = p->velocity.y * dt;
 	}
@@ -1349,7 +1349,8 @@ void Printplayer(Player *player, Game *game, char f){
 }
 
 int main(){
-    
+	double start_game = GetTime();
+    SetTraceLogLevel(LOG_WARNING);
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
     Texture2D fnTerrain = LoadTexture("atlas/atlas_terrain.png");
     SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
@@ -1431,6 +1432,11 @@ int main(){
 			if(IsKeyDown(KEY_F3)){ Printplayer(player, game, 0); }
         EndDrawing();
     }
+	
+	// FINAL PRINT
+	double end_game = GetTime();
+	float time_played = (float) (end_game - start_game);
+	printf("Time Played: %.4fs\n", time_played);
 	
 	// UNLOAD FEATURES
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
