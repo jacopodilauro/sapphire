@@ -28,8 +28,8 @@
 
 #define GEN_QUEUE_SIZE 128
 // SCREEN
-#define WIDTH 1800
-#define HEIGHT 1200
+#define WIDTH 1600
+#define HEIGHT 990
 
 #define GRAVITY 28
 
@@ -49,7 +49,11 @@
 #define CHUNK_HEIGTH 128
 #define MAX_CHUNK_FACES (CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6)
 
-#define HEIGHT_GROUND 110
+// LAND
+#define HEIGHT_GROUND 126
+#define MIN_MOUNTAIN 35    // min height of land
+#define MAX_MOUNTAIN 100   // max height
+#define WATER_LEVEL_FIXED 45
 
 #define LOCAL_WORLD_SIZE 17
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
@@ -176,7 +180,7 @@ const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
 };
 
 void InitPlayer(struct Player *p){
-	p->position = (Vector3){ 0.0f, 50.0f, 0.0f };
+	p->position = (Vector3){ 0.0f, 500.0f, 0.0f };
 	p->velocity = (Vector3){0};
 	p->isOnGround 		= 0;
 	p->isFlying 		= 1;
@@ -668,8 +672,8 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
 	
 	int octaves = 6;
 	float persistence = 0.5f;
-	float lacunarity = 2.0f;
-	float scale = 100.0f;
+	float lacunarity = 2.0f; 
+	float scale = 100.0f; // durezza e morbidezza
 	
 	memset(c->Map, 0, sizeof(c->Map));
 	//MAP / floor
@@ -678,12 +682,29 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
         	float globalX = (gX * CHUNK_SIZE) + x;
         	float globalZ = (gZ * CHUNK_SIZE) + z;
             //float noise = PerlinNoise(globalX * 0.09f, 0.0f, globalZ * 0.09f);
+			// NOISE Ground Level
 			float noise = FractalBrownianMotion(globalX, globalZ, octaves, persistence, lacunarity, scale);
-            float noiseNorm = pow((noise + 1.0f) / 2.0f, 2.0f);
-            HEIGHTGROUND = (int)(noiseNorm * HEIGHT_GROUND) + 2;
+			/*float baseNoise = PerlinNoise(globalX * 0.002f + 1000.0f, 0.0f, globalZ * 0.002f + 1000.0f);
+            int mountain_off = (int) (baseNoise * 25);*/
+            float noiseNorm = pow(noise + 0.5f, 2.0f);
+            if(noiseNorm > 1.0f) noiseNorm = 1.0f;
+			if(noiseNorm < 0.0f) noiseNorm = 0.0f;
+            HEIGHTGROUND = (int)(noiseNorm * HEIGHT_GROUND) + 2; //+ mountain_off*/;
+            /*if (HEIGHTGROUND < 3) HEIGHTGROUND = 3;
+            if (HEIGHTGROUND > CHUNK_HEIGTH - 10) HEIGHTGROUND = CHUNK_HEIGTH - 10;*/
             
 			float waterNoiseNorm = pow((-0.2f + 1.0f) / 2.0f, 2.0f);
             WATER_LEVEL = (int)(waterNoiseNorm * HEIGHT_GROUND) + 2;
+
+/*
+ * 	float t = noise / 0.5f;              // il rumore FBM sta circa in [-0.5, 0.5]
+	if(t >  1.0f) t =  1.0f;
+	if(t < -1.0f) t = -1.0f;
+	t = (t + 1.0f) * 0.5f;               // ora t sta in [0, 1]
+
+	HEIGHTGROUND = MIN_MOUNTAIN + (int)(t * (MAX_MOUNTAIN - MIN_MOUNTAIN));
+	WATER_LEVEL  = WATER_LEVEL_FIXED;
+ * */
 
             for(int y = 0; y < HEIGHTGROUND; y++){
 				
@@ -698,7 +719,7 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
                 } 
 				else {
                     if (HEIGHTGROUND > WATER_LEVEL + 28) { 
-                        if (y == HEIGHTGROUND - 1) c->Map[x][y][z] = SNOW;
+                        if (y >= HEIGHTGROUND - 5 && y >= 59) c->Map[x][y][z] = SNOW;
                         else c->Map[x][y][z] = ROCK;
                     } 
                     else if (HEIGHTGROUND > WATER_LEVEL + 20) { 
@@ -1296,7 +1317,7 @@ void Printplayer(Player *player, Game *game, char f){
 	DrawText(char_dir, 10, 50, FONT_SIZE, WHITE);
 	
 	char char_xp[128];
-	sprintf(char_xp, "Level XP: %d / XP Bar: %d%\n", player->xp, player->xpBar * 3.125);
+	sprintf(char_xp, "Level XP: %d / XP Bar: %.2f%\n", player->xp, player->xpBar * 3.125);
 	DrawText(char_xp, 10, 70, FONT_SIZE, WHITE);	
 	
 	char char_heal[128];
@@ -1344,7 +1365,7 @@ void Printplayer(Player *player, Game *game, char f){
 	int hours = timeOfDay / 1000;
 	int min_k = timeOfDay % 1000;
 	int min = 60 * min_k / 1000;
-	sprintf(char_clock, "%d:%d", hours, min);
+	sprintf(char_clock, "%02d:%02d", hours, min);
 	DrawText(char_clock, (WIDTH / 2) - MeasureText(char_clock, 40), 10, 40, WHITE);  
 }
 
