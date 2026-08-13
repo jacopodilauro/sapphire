@@ -719,7 +719,8 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
                 } 
 				else {
                     if (HEIGHTGROUND > WATER_LEVEL + 28) { 
-                        if (y >= HEIGHTGROUND - 5 && y >= 59) c->Map[x][y][z] = SNOW;
+			int snowLine = (int)(PerlinNoise(globalX*0.04f + 9000.0f, 0.5f, globalZ*0.04f + 9000.0f) * 24.0f);
+                        if (y >= HEIGHTGROUND - 5 && y >= 61 + snowLine) c->Map[x][y][z] = SNOW;
                         else c->Map[x][y][z] = ROCK;
                     } 
                     else if (HEIGHTGROUND > WATER_LEVEL + 20) { 
