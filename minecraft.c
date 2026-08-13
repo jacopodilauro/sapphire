@@ -107,6 +107,16 @@ enum BlockType {
 	MAX_BLOCK_TYPES
 };
 
+enum BiomeType {
+	PLAINS			= 0,
+	FOREST			= 1,
+	BEACH			= 2,
+	MOUNTAINS_PEAKS	= 3,
+	OCEAN			= 4,
+	DESERT			= 5,
+	MAX_BIOME_TYPES
+};
+
 typedef struct Time{
     long long totTicks;
     int   timeOfDay;
@@ -126,8 +136,9 @@ typedef struct Chunk{
 typedef struct Game{
 	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
 	Time time;
-	int mode  	 : 1; // CREATIVE (0)/ SURVIVOL(1)
-	int opt_mode : 1; // FAST (0)/ NORMAL (1)
+	int biome; 
+	unsigned int mode  	 	: 1; // CREATIVE (0)/ SURVIVOL(1)
+	unsigned int opt_mode 	: 1; // FAST (0)/ NORMAL (1)
 }Game;
 
 typedef struct CameraController{
@@ -180,7 +191,7 @@ const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
 };
 
 void InitPlayer(struct Player *p){
-	p->position = (Vector3){ 0.0f, 500.0f, 0.0f };
+	p->position = (Vector3){ 0.0f, 250.0f, 0.0f };
 	p->velocity = (Vector3){0};
 	p->isOnGround 		= 0;
 	p->isFlying 		= 1;
@@ -217,8 +228,10 @@ void InitPlayer(struct Player *p){
 
 BoundingBox PosToBox(Vector3 *pos){
 	float dw = PLAYER_WIDTH / 2;
-	return (BoundingBox){ pos->x - dw, pos->y,					pos->z - dw,
-						  pos->x + dw, pos->y + PLAYER_HEIGHT,	pos->z + dw};
+	return (BoundingBox){ 
+			    	{ pos->x - dw, pos->y,			pos->z - dw},
+			    	{ pos->x + dw, pos->y + PLAYER_HEIGHT,	pos->z + dw}
+			    };
 }
 
 int IsTransparent(int blockID) {
@@ -315,7 +328,7 @@ void DrawSun(Vector3 *position, Time *t, Model sunModel, Model moonModel){
 	float moonRadius = 2000.0f;
 	
 	float cx = position->x;
-    float cy = position->y;
+    //float cy = position->y;
     float cz = position->z;
 
     Vector3 sunPos = {
@@ -392,9 +405,9 @@ void UpdateCustomCamera(struct CustomCamera *cam, float dt){
         cam->position = Vector3Add( cam->position,
 							Vector3Scale(right, currentSpeed * dt));
 
-    if (IsKeyDown(KEY_A))
+    if (IsKeyDown(KEY_A)){
         cam->position = Vector3Subtract(cam->position, 
-							Vector3Scale(right, currentSpeed * dt));
+							Vector3Scale(right, currentSpeed * dt));}
 	
 	if (IsKeyDown(KEY_SPACE))
         cam->position.y += currentSpeed * dt;
@@ -495,6 +508,16 @@ float FractalBrownianMotion(float x, float z, int octaves, float persistence, fl
     return total / maxValue; 
 }
 
+// makes no sense that humidity and temperature influence BEACH AND OCEAN but now idc
+int GetBiome(float gx, float gz){
+	float temp  = PerlinNoise(gx*0.0015f + 500.0f,  0.0f, gz*0.0015f + 500.0f);
+    float humid = PerlinNoise(gx*0.0015f + 9000.0f, 0.0f, gz*0.0015f + 9000.0f);
+
+	if(temp < -0.20f) return (humid < 0.0f) ? MOUNTAINS_PEAKS : FOREST;
+    if(temp > 0.25f) return (humid < 0.0f) ? BEACH : DESERT;
+    return (humid > 0.4) ? OCEAN : PLAINS; 
+}
+
 void GetCoordinatesFromAtlas(int textureID, int vertexID, float *u_out, float *v_out){
 	int img_col = 16;
 	int img_row = 16;
@@ -582,9 +605,9 @@ Model BuildItemModel(int block) {
 }
 
 void InitTextureInventary(Texture2D terrain, Player *player){
-	Camera3D Texturecam = {2.5f, 2.5f, 2.5f,	// position
-							0.0f, 0.0f, 0.0f,	// target
-							0.0f, 1.0f, 0.0f,	// up
+	Camera3D Texturecam = {	{2.5f, 2.5f, 2.5f},	// position
+							{0.0f, 0.0f, 0.0f},	// target
+							{0.0f, 1.0f, 0.0f},	// up
 							2.2f,				// fovy
 							CAMERA_ORTHOGRAPHIC};// projection
 
@@ -1318,15 +1341,15 @@ void Printplayer(Player *player, Game *game, char f){
 	DrawText(char_dir, 10, 50, FONT_SIZE, WHITE);
 	
 	char char_xp[128];
-	sprintf(char_xp, "Level XP: %d / XP Bar: %.2f%\n", player->xp, player->xpBar * 3.125);
+	sprintf(char_xp, "Level XP: %d / XP Bar: %.2f%%\n", player->xp, player->xpBar * 3.125);
 	DrawText(char_xp, 10, 70, FONT_SIZE, WHITE);	
 	
 	char char_heal[128];
-	sprintf(char_heal, "Heal: %d%\n", player->heal * 5);
+	sprintf(char_heal, "Heal: %d%%\n", player->heal * 5);
 	DrawText(char_heal, 10, 90, FONT_SIZE, WHITE);	
 	
 	char char_hungry[128];
-	sprintf(char_hungry, "Hungry: %d%\n", player->hungry * 5);
+	sprintf(char_hungry, "Hungry: %d%%\n", player->hungry * 5);
 	DrawText(char_hungry, 10, 110, FONT_SIZE, WHITE);
 	
 	char char_slotItemBar[128];
@@ -1361,7 +1384,7 @@ void Printplayer(Player *player, Game *game, char f){
 	DrawText(char_tmp, WIDTH * 0.75, 90, FONT_SIZE, WHITE);
 	
 	// CLOCK
-	char char_clock[5];
+	char char_clock[16]; // 6 is enough, but I'm put 16 to avoid warnings
 	int timeOfDay = game->time.timeOfDay;
 	int hours = timeOfDay / 1000;
 	int min_k = timeOfDay % 1000;
