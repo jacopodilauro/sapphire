@@ -203,7 +203,7 @@ void InitPlayer(struct Player *p){
 	p->blocksInHand[0] = GRASS;
 	p->blocksInHand[1] = AIR;
 	p->blocksInHand[2] = SAND;
-	p->blocksInHand[3] = GRASS;
+	p->blocksInHand[3] = LEAF;
 	p->blocksInHand[4] = SNOW;
 	p->blocksInHand[5] = WATER;
 	p->blocksInHand[6] = ROCK;
