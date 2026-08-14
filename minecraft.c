@@ -4,9 +4,10 @@
  [x] ottimizzare la generazione chunk													|05/08/26 <note: da fare con i threads>
  [x] gui blocchetti nell inventario														|
  [x] poter selzionare blocchi da piazzare												|
- [] inserisco poi le colisioni 3D														|
- [] gravità e il salto	 																|
+ [x] inserisco poi le colisioni 3D														|
+ [x] gravità e il salto	 																|
  [x] inseriamo il sole, luna, alberi, montagne											|
+ [x] inserisco biomi																	|
  [] inseriamo la terza persona e prima persona. 										|
  [] sezioni																				|
 */
@@ -34,7 +35,7 @@
 #define GRAVITY 28
 
 // GUI
-#define GUI_SCALE 5
+#define GUI_SCALE 3.5
 #define ITEM_BAR_SIZE 9
 #define FONT_SIZE 20
 
@@ -117,6 +118,15 @@ enum BiomeType {
 	MAX_BIOME_TYPES
 };
 
+char *biomeName[] = { 
+	"Plains",
+	"Forest",
+	"Beach",
+	"Mountain Peaks",
+	"Ocean",
+	"Desert"
+};
+
 typedef struct Time{
     long long totTicks;
     int   timeOfDay;
@@ -136,9 +146,9 @@ typedef struct Chunk{
 typedef struct Game{
 	Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE];
 	Time time;
-	int biome; 
 	unsigned int mode  	 	: 1; // CREATIVE (0)/ SURVIVOL(1)
 	unsigned int opt_mode 	: 1; // FAST (0)/ NORMAL (1)
+	unsigned int isKeyF3	: 1;
 }Game;
 
 typedef struct CameraController{
@@ -156,6 +166,7 @@ typedef struct Player{
 	Vector3 lookDir;
 	Vector3 ray;
 	
+	int biome; 
 	// Bit field
 	unsigned int xp : 7; 
 	
@@ -214,6 +225,8 @@ void InitPlayer(struct Player *p){
     p->selectedSlotItemBar = 0;
     p->isInWater = 0;
     p->isTakingDamage = 0;
+
+	p->biome = -1;
 
 	p->blocksInHand[0] = GRASS;
 	p->blocksInHand[1] = AIR;
@@ -349,15 +362,6 @@ void DrawSun(Vector3 *position, Time *t, Model sunModel, Model moonModel){
                 (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
     DrawModelEx(moonModel, moonPos, rotationAx, rotationAngle + 180.0f,
                 (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
-}
-
-void UpdatePlayerStats(Player *player){
-	
-	int move = -(int)GetMouseWheelMove();
-    if (move != 0) {
-		int newSlot = player->selectedSlotItemBar + move;
-		player -> selectedSlotItemBar = (newSlot % ITEM_BAR_SIZE + ITEM_BAR_SIZE) % ITEM_BAR_SIZE;
-	}
 }
 
 void UpdateCustomCamera(struct CustomCamera *cam, float dt){
@@ -514,8 +518,19 @@ int GetBiome(float gx, float gz){
     float humid = PerlinNoise(gx*0.0015f + 9000.0f, 0.0f, gz*0.0015f + 9000.0f);
 
 	if(temp < -0.20f) return (humid < 0.0f) ? MOUNTAINS_PEAKS : FOREST;
-    if(temp > 0.25f) return (humid < 0.0f) ? BEACH : DESERT;
+    if(temp > 0.20f) return (humid < 0.0f) ? BEACH : DESERT;
     return (humid > 0.4) ? OCEAN : PLAINS; 
+}
+
+void UpdatePlayerStats(Player *player){
+	
+	int move = -(int)GetMouseWheelMove();
+    if (move != 0) {
+		int newSlot = player->selectedSlotItemBar + move;
+		player -> selectedSlotItemBar = (newSlot % ITEM_BAR_SIZE + ITEM_BAR_SIZE) % ITEM_BAR_SIZE;
+	}
+	// BIOME
+	player-> biome = GetBiome(player->position.x, player->position.z);
 }
 
 void GetCoordinatesFromAtlas(int textureID, int vertexID, float *u_out, float *v_out){
@@ -1110,6 +1125,7 @@ void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D f
 	InitWorldTime(&game->time);
 	game -> mode = 0;
 	game -> opt_mode = 0;
+	game -> isKeyF3 = 0;
 	
 	Chunk (*world)[LOCAL_WORLD_SIZE] = game->world;
 	for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
@@ -1333,6 +1349,7 @@ void UpdatePlayer(Game *game, Player *p, float dt){
 									p->position.y + PLAYER_EYE,
 									p->position.z };
 	p->camera.target = Vector3Add(p->camera.position, forward);
+	
 }
 
 void Printplayer(Player *player, Game *game, char f){
@@ -1367,6 +1384,10 @@ void Printplayer(Player *player, Game *game, char f){
 	char char_ground[128];
 	sprintf(char_ground, "On Ground: %s\n", player->isOnGround ? "true" : "false");
 	DrawText(char_ground, 10, 190, FONT_SIZE, WHITE);
+	
+	char char_biome[128];
+	sprintf(char_biome, "Biome: %s\n", biomeName[player->biome]);
+	DrawText(char_biome, 10, 210, FONT_SIZE, WHITE);
 
 	// Global game's variables
 	DrawText("Global game's variables:\n", WIDTH * 0.75, 30, FONT_SIZE, WHITE);
@@ -1394,14 +1415,27 @@ void Printplayer(Player *player, Game *game, char f){
 }
 
 int main(){
+
+/*
+ * 	Texture2D fnTerrain = LoadTexture("texture/atlas/atlas_terrain.png");
+ *	GenTextureMipmaps(&fnTerrain); // <--- AGGIUNGI QUESTA RIGA PER IL TRILINEAR
+ *	SetTextureFilter(fnTerrain, TEXTURE_FILTER_TRILINEAR);
+ * */
+
 	double start_game = GetTime();
+	
     SetTraceLogLevel(LOG_WARNING);
     InitWindow(WIDTH, HEIGHT, "Minecraft"); 
-    Texture2D fnTerrain = LoadTexture("atlas/atlas_terrain.png");
-    SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
-	Texture2D gui = LoadTexture("atlas/atlas_gui.png");
-	Texture2D ascii = LoadTexture("atlas/atlas_ascii.png");
-	Texture2D cielo = LoadTexture("atlas/atlas_celestials.png");
+    
+    Texture2D fnTerrain = LoadTexture("texture/atlas/atlas_terrain.png");
+	Texture2D gui = LoadTexture("texture/atlas/atlas_gui.png");
+	Texture2D ascii = LoadTexture("texture/atlas/atlas_ascii.png");
+	Texture2D cielo = LoadTexture("texture/atlas/atlas_celestials.png");
+
+	SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
+	SetTextureFilter(gui, TEXTURE_FILTER_POINT);
+	SetTextureFilter(ascii, TEXTURE_FILTER_POINT);
+	SetTextureFilter(cielo, TEXTURE_FILTER_POINT);
 
 	Model sunModel = BuildModel(cielo, 400, 175, 47, 8, 8);
 	Model moonModel = BuildModel(cielo, 400, 79, 13, 8, 8);
@@ -1445,7 +1479,8 @@ int main(){
 		}
 		if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)){
 			PlaceBlockRay(player, game, fnTerrain);
-		}		
+		}
+		if(IsKeyPressed(KEY_F3)){ game->isKeyF3 = !(game->isKeyF3); }
 
 		//if(IsKeyDown(KEY_G)) TryMoveAxis(player, game->world, (Vector3){0, -2.0f * dt, 0});
 		if(IsKeyDown(KEY_G)){ 
@@ -1466,7 +1501,7 @@ int main(){
     			}   
 				
 				DrawSun(&player->camera.position, &game->time, sunModel, moonModel);			
-				if(IsKeyDown(KEY_F3)){ DrawBoundingBox(player->playerBox, RED);}
+				if(game->isKeyF3){ DrawBoundingBox(player->playerBox, RED);}
 			EndMode3D();
 			
 			DrawFPS(10, 10);
@@ -1474,7 +1509,7 @@ int main(){
 			UpdatePlayerStats(player);
 			DrawGUI(gui, ascii, player);
 			
-			if(IsKeyDown(KEY_F3)){ Printplayer(player, game, 0); }
+			if(game->isKeyF3){ Printplayer(player, game, 0); }
         EndDrawing();
     }
 	
