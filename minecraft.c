@@ -65,6 +65,7 @@
 #define PLAYER_EYE 	   1.6f
 #define PLAYER_SPEED   4.3f
 #define JUMP_SPEED     8.4f
+#define SKIN_PX (PLAYER_HEIGHT / 32.0f)
 
 #define SENS_MOUSE 	  0.15f
 
@@ -157,6 +158,17 @@ typedef struct CameraController{
 	float sensitivity;
 }CameraController;
 
+typedef struct BodyPart{
+	Model model;
+    Vector3 pivot; // articolazione
+    Vector3 rot;  
+}BodyPart;
+
+typedef struct Skin{
+	BodyPart head, body, armR, armL, legR, legL;
+	Vector3 pos;
+}Skin;
+
 typedef struct Player{
 	Vector3 position;
 	Vector3 velocity;
@@ -165,6 +177,8 @@ typedef struct Player{
 	CameraController view;
 	Vector3 lookDir;
 	Vector3 ray;
+	
+	Skin skin;
 	
 	int biome; 
 	// Bit field
@@ -180,6 +194,9 @@ typedef struct Player{
 	unsigned int isCollisioning : 1;
 	unsigned int isOnGround 	: 1;
 	unsigned int isFlying		: 1;
+	unsigned int isThirdPerson 	: 1;
+	unsigned int modeWalking 	: 2; 
+	// 0:static 1:walking 2:running 
 	
 	unsigned int blocksInHand[ITEM_BAR_SIZE];
 	RenderTexture2D blockIcons[MAX_BLOCK_TYPES];
@@ -201,12 +218,84 @@ const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
 			[LEAF_OPAQUE] = 54
 };
 
-void InitPlayer(struct Player *p){
+
+Model BuildSkinModel(Texture2D skinTex, float sx, float sy, float sz, float ox, float oy){
+	Mesh mesh = {0};
+    mesh.vertexCount = 24;
+    mesh.triangleCount = 12;
+    mesh.vertices = (float*)malloc(mesh.vertexCount * 3 * sizeof(float));
+    mesh.indices = (unsigned short*)malloc(mesh.triangleCount * 3 * sizeof(unsigned short));
+    mesh.texcoords = (float*)malloc(mesh.vertexCount * 2 * sizeof(float));
+    
+    float hx = sx/2, hy = sy/2, hz = sz/2;
+    
+    const float facce[6][4][3] = {
+        {{-hx,-hy, hz},{ hx,-hy, hz},{ hx, hy, hz},{-hx, hy, hz}}, // FRONT
+        {{ hx,-hy,-hz},{-hx,-hy,-hz},{-hx, hy,-hz},{ hx, hy,-hz}}, // BACK
+        {{ hx,-hy, hz},{ hx,-hy,-hz},{ hx, hy,-hz},{ hx, hy, hz}}, // LEFT
+        {{-hx,-hy,-hz},{-hx,-hy, hz},{-hx, hy, hz},{-hx, hy,-hz}}, // RIGHT
+        {{-hx, hy, hz},{ hx, hy, hz},{ hx, hy,-hz},{-hx, hy,-hz}}, // TOP
+        {{-hx,-hy,-hz},{ hx,-hy,-hz},{ hx,-hy, hz},{-hx,-hy, hz}}  // BOTTOM
+    };
+/*    
+    <HEAD>
+    0	8	 16	   24	32
+    +----+----+----+----+
+    |	   T    Bo		|
+    +-------------------+
+    | R		F	 L	 Ba	|
+    +----+----+----+----+
+
+*/ 
+    const float uv[6][4] = {
+        {ox+sz,        oy+sz, sx, sy},  // FRONT
+        {ox+2*sz+sx,   oy+sz, sx, sy},  // BACK
+        {ox+sz+sx,     oy+sz, sz, sy},  // LEFT
+        {ox,           oy+sz, sz, sy},  // RIGHT
+        {ox+sz,        oy,    sx, sz},  // TOP
+        {ox+sz+sx,     oy,    sx, sz}   // BOTTOM
+    };
+
+    int vCount = 0, iCount = 0, tCount = 0;
+    for(int f = 0; f < 6; f++) {
+        for(int v = 0; v < 4; v++) {
+            mesh.vertices[vCount*3+0] = facce[f][v][0] * SKIN_PX;
+            mesh.vertices[vCount*3+1] = facce[f][v][1] * SKIN_PX;
+            mesh.vertices[vCount*3+2] = facce[f][v][2] * SKIN_PX;
+            vCount++;
+        }
+
+        int vBase = f * 4;
+        mesh.indices[iCount+0] = vBase + 0;
+        mesh.indices[iCount+1] = vBase + 1;
+        mesh.indices[iCount+2] = vBase + 2;
+        mesh.indices[iCount+3] = vBase + 0;
+        mesh.indices[iCount+4] = vBase + 2;
+        mesh.indices[iCount+5] = vBase + 3;
+        iCount += 6;
+
+        float u0 = (uv[f][0] + 0.01f) / 64.0f;
+        float u1 = (uv[f][0] + uv[f][2] - 0.01f) / 64.0f;
+        float v0 = (uv[f][1] + 0.01f) / 64.0f;
+        float v1 = (uv[f][1] + uv[f][3] - 0.01f) / 64.0f;
+        float uvs[8] = {u0,v1, u1,v1, u1,v0, u0,v0};
+
+        for(int i = 0; i < 8; i++) mesh.texcoords[tCount++] = uvs[i];
+    }
+
+    UploadMesh(&mesh, false);
+    Model model = LoadModelFromMesh(mesh);
+    model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = skinTex;
+    return model;
+}
+
+void InitPlayer(struct Player *p, Texture2D skinTex){
 	p->position = (Vector3){ 0.0f, 250.0f, 0.0f };
 	p->velocity = (Vector3){0};
+	p->isCollisioning 	= 0;
 	p->isOnGround 		= 0;
 	p->isFlying 		= 1;
-	p->isCollisioning 	= 0;
+	p->isThirdPerson	= 0;
 
 	p->view.yaw 		= 180.0f;
 	p->view.pitch 		= 0.0f;
@@ -237,6 +326,24 @@ void InitPlayer(struct Player *p){
 	p->blocksInHand[6] = ROCK;
 	p->blocksInHand[7] = BADROCK;
 	p->blocksInHand[8] = LOG;
+	
+	// SKIN
+	//p->skin = (Skin)malloc(sizeof(Skin));
+	p->skin.head.model = BuildSkinModel(skinTex, 8, 8, 8, 0, 0);
+	p->skin.body.model = BuildSkinModel(skinTex, 8, 12, 4, 16, 16);
+	p->skin.armR.model = BuildSkinModel(skinTex, 4, 12, 4, 40, 16);
+	p->skin.armL.model = BuildSkinModel(skinTex,4, 12, 4, 32, 48);
+	p->skin.legR.model = BuildSkinModel(skinTex, 4, 12, 4,  0, 16);
+	p->skin.legL.model = BuildSkinModel(skinTex, 4, 12, 4, 16, 48);
+	
+	p->skin.body.pivot = (Vector3){               0,				  0, 0 };   
+	p->skin.head.pivot = (Vector3){               0,	24.0f * SKIN_PX, 0 };  
+	p->skin.armR.pivot = (Vector3){ -5.0f * SKIN_PX, 	22.0f * SKIN_PX, 0 };
+	p->skin.armL.pivot = (Vector3){  5.0f * SKIN_PX, 	22.0f * SKIN_PX, 0 };
+	p->skin.legR.pivot = (Vector3){ -2.0f * SKIN_PX, 	12.0f * SKIN_PX, 0 }; 
+	p->skin.legL.pivot = (Vector3){  2.0f * SKIN_PX, 	12.0f * SKIN_PX, 0 };
+	
+	p->skin.pos = p->position;
 }
 
 BoundingBox PosToBox(Vector3 *pos){
@@ -552,6 +659,21 @@ void GetCoordinatesFromAtlas(int textureID, int vertexID, float *u_out, float *v
 	if(vertexID == 3) { *u_out = topX + img_percent_width; 	*v_out = topY + img_percent_height; } 
 }
 
+static void DrawPart(Model m, Vector3 base, float ox, float oy, float yaw){
+	Vector3 off = Vector3RotateByAxisAngle((Vector3){ ox*SKIN_PX, oy*SKIN_PX, 0.0f },
+	                                       (Vector3){0,1,0}, DEG2RAD * yaw);
+	DrawModelEx(m, Vector3Add(base, off), (Vector3){0,1,0}, yaw, (Vector3){1,1,1}, WHITE);
+}
+
+void DrawSkin(Skin *skin, float yaw){
+	DrawPart(skin->head.model, skin->pos,  0, 28, yaw);
+	DrawPart(skin->body.model, skin->pos,  0, 18, yaw);
+	DrawPart(skin->armL.model, skin->pos,  6, 18, yaw);
+	DrawPart(skin->armR.model, skin->pos, -6, 18, yaw);
+	DrawPart(skin->legL.model, skin->pos,  2,  6, yaw);
+	DrawPart(skin->legR.model, skin->pos, -2,  6, yaw);
+}
+
 Model BuildItemModel(int block) {
     Mesh mesh = {0};
     mesh.vertexCount = 24;
@@ -562,16 +684,6 @@ Model BuildItemModel(int block) {
 
     int vCount = 0, iCount = 0, tCount = 0;
 	int textureID = BLOCK_TEXTURE[(int) block];
-    /*int textureID = AIR;
-    if(blockType == SAND){ textureID = 18; }
-    else if(blockType == DIRT){ textureID = 2; }
-    else if(blockType == GRASS){ textureID = 3; }
-    else if(blockType == ROCK){ textureID = 1; }
-    else if(blockType == WATER){ textureID = 207; }
-    else if(blockType == SNOW){ textureID = 66; }
-    else if(blockType == BADROCK){ textureID = 17; }
-    else if(blockType == LEAF){ textureID = 52; }
-    else if(blockType == LOG){ textureID = 20; }*/
 
     // Veritci coordinates for a (-0.5 0.5) cube
     const float facce[6][4][3] = {
@@ -1155,7 +1267,9 @@ void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D f
 
 void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 	player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
-	player->ray = player->camera.position;
+	player->ray = (Vector3){ player->position.x,
+	                         player->position.y + PLAYER_EYE,
+	                         player->position.z };
 	
 	for(float i = 0.0; i < MAX_RAY_DISTANCE; i+= STEP_RAY_SIZE){
 		player->ray.x += player->lookDir.x * STEP_RAY_SIZE;
@@ -1190,7 +1304,9 @@ void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 	int block_selected = player->blocksInHand[(int)player->selectedSlotItemBar];
 	player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
-	player->ray = player->camera.position;
+	player->ray = (Vector3){ player->position.x,
+	                         player->position.y + PLAYER_EYE,
+	                         player->position.z };
 	
 	int prec_gx = (int)floorf(player->ray.x);
 	int prec_gy = (int)floorf(player->ray.y);
@@ -1345,10 +1461,20 @@ void UpdatePlayer(Game *game, Player *p, float dt){
 	p->isCollisioning = BoxColliderWorld(game->world, &p->playerBox);
 	p->lookDir = forward;
 
-	p->camera.position = (Vector3){ p->position.x,
-									p->position.y + PLAYER_EYE,
-									p->position.z };
-	p->camera.target = Vector3Add(p->camera.position, forward);
+	Vector3 eye = (Vector3){ p->position.x,
+							 p->position.y + PLAYER_EYE,
+							 p->position.z };
+
+	if(p->isThirdPerson){
+		p->camera.position = Vector3Subtract(eye, Vector3Scale(forward, 4.0f));
+		p->camera.target   = eye;
+	} else {
+		eye = Vector3Add(eye, Vector3Scale(flat, 3.0f * SKIN_PX));
+		p->camera.position = eye;
+		p->camera.target   = Vector3Add(eye, forward);
+	}
+	// SKIN
+	p->skin.pos = (Vector3)p->position;
 	
 }
 
@@ -1414,6 +1540,22 @@ void Printplayer(Player *player, Game *game, char f){
 	DrawText(char_clock, (WIDTH / 2) - MeasureText(char_clock, 40), 10, 40, WHITE);  
 }
 
+void UnloadSkin(Skin *skin){
+	skin->head.model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = (Texture2D){0};
+	skin->body.model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = (Texture2D){0};
+	skin->armL.model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = (Texture2D){0};
+	skin->armR.model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = (Texture2D){0};
+	skin->legL.model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = (Texture2D){0};
+	skin->legR.model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = (Texture2D){0};
+	
+	UnloadModel(skin->head.model);
+	UnloadModel(skin->body.model);
+	UnloadModel(skin->armL.model);
+	UnloadModel(skin->armR.model);
+	UnloadModel(skin->legL.model);
+	UnloadModel(skin->legR.model);
+}
+
 int main(){
 
 /*
@@ -1431,19 +1573,20 @@ int main(){
 	Texture2D gui = LoadTexture("texture/atlas/atlas_gui.png");
 	Texture2D ascii = LoadTexture("texture/atlas/atlas_ascii.png");
 	Texture2D cielo = LoadTexture("texture/atlas/atlas_celestials.png");
+	Texture2D skinTex_TD = LoadTexture("texture/skin-player/Ari.png");
 
 	SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
 	SetTextureFilter(gui, TEXTURE_FILTER_POINT);
 	SetTextureFilter(ascii, TEXTURE_FILTER_POINT);
 	SetTextureFilter(cielo, TEXTURE_FILTER_POINT);
+	SetTextureFilter(skinTex_TD, TEXTURE_FILTER_POINT);
 
 	Model sunModel = BuildModel(cielo, 400, 175, 47, 8, 8);
 	Model moonModel = BuildModel(cielo, 400, 79, 13, 8, 8);
 	
-
-    // Initialize World, Texture Inventary, Player
+    // Initialize World, Texture Inventary, Player, Skin
 	Player *player = (Player*)malloc(sizeof(Player));
-	InitPlayer(player);
+	InitPlayer(player, skinTex_TD);
 
 	int chunkPlayerX = (int)floorf(player->position.x / CHUNK_SIZE);
 	int chunkPlayerZ = (int)floorf(player->position.z / CHUNK_SIZE);
@@ -1481,6 +1624,7 @@ int main(){
 			PlaceBlockRay(player, game, fnTerrain);
 		}
 		if(IsKeyPressed(KEY_F3)){ game->isKeyF3 = !(game->isKeyF3); }
+		if(IsKeyPressed(KEY_F5)){player->isThirdPerson = !player->isThirdPerson;}
 
 		//if(IsKeyDown(KEY_G)) TryMoveAxis(player, game->world, (Vector3){0, -2.0f * dt, 0});
 		if(IsKeyDown(KEY_G)){ 
@@ -1499,6 +1643,8 @@ int main(){
 						}
 					}
     			}   
+				//DrawSkinModel(head_TD, body_TD, armR_TD, armL_TD, legR_TD, legL_TD, player->position /*(Vector3){0, 70, 0}*/);
+				DrawSkin(&player->skin, player->view.yaw);
 				
 				DrawSun(&player->camera.position, &game->time, sunModel, moonModel);			
 				if(game->isKeyF3){ DrawBoundingBox(player->playerBox, RED);}
@@ -1518,7 +1664,9 @@ int main(){
 	float time_played = (float) (end_game - start_game);
 	printf("Time Played: %.4fs\n", time_played);
 	
-	// UNLOAD FEATURES
+	// UNLOAD FEATURES	
+	UnloadSkin(&player->skin);
+	
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
       		UnloadModel(game->world[wx][wz].model);
@@ -1533,8 +1681,10 @@ int main(){
 	UnloadTexture(gui);
 	UnloadTexture(ascii);
 	UnloadTexture(cielo);
+	UnloadTexture(skinTex_TD);
 	UnloadModel(sunModel);
 	UnloadModel(moonModel);
+	
     CloseWindow(); 
 	
 	free(player);
