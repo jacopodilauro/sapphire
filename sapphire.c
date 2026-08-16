@@ -10,6 +10,8 @@
  [x] inserisco biomi																	|
  [] inseriamo la terza persona e prima persona. 										|
  [] sezioni																				|
+ [] ottimizzazione meshing
+ [] update texture
 */
 
 #include <raylib.h>
