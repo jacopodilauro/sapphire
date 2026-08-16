@@ -108,6 +108,7 @@ enum BlockType {
 	LEAF 		= 8,
 	LOG 		= 9,
 	LEAF_OPAQUE = 10,
+	SNOW_GRASS 	= 11,
 	MAX_BLOCK_TYPES
 };
 
@@ -218,7 +219,7 @@ typedef struct CustomCamera{
 const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
 			[AIR]  =   0, [SAND] = 18, [DIRT] 	=  2, [GRASS]= 3, [ROCK]= 1,
 			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =53, [LOG] =20,
-			[LEAF_OPAQUE] = 54
+			[LEAF_OPAQUE] = 54, [SNOW_GRASS] = 68
 };
 
 
