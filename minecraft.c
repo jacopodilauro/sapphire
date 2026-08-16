@@ -195,7 +195,8 @@ typedef struct Player{
 	unsigned int isOnGround 	: 1;
 	unsigned int isFlying		: 1;
 	unsigned int isThirdPerson 	: 1;
-	unsigned int modeWalking 	: 2; 
+	
+	unsigned int modeOfMovement	: 2; 
 	// 0:static 1:walking 2:running 
 	
 	unsigned int blocksInHand[ITEM_BAR_SIZE];
@@ -290,7 +291,7 @@ Model BuildSkinModel(Texture2D skinTex, float sx, float sy, float sz, float ox, 
 }
 
 void InitPlayer(struct Player *p, Texture2D skinTex){
-	p->position = (Vector3){ 0.0f, 250.0f, 0.0f };
+	p->position = (Vector3){ 0.0f, 150.0f, 0.0f };
 	p->velocity = (Vector3){0};
 	p->isCollisioning 	= 0;
 	p->isOnGround 		= 0;
@@ -1301,6 +1302,17 @@ void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 	}
 }
 
+int isAroundPlayer(Player *player, int bx, int by, int bz){
+	
+    BoundingBox pb = player->playerBox;
+    const float eps = 1e-4f;
+
+    return (pb.min.x < bx + 1.0f - eps && pb.max.x > bx + eps) &&
+           (pb.min.y < by + 1.0f - eps && pb.max.y > by + eps) &&
+           (pb.min.z < bz + 1.0f - eps && pb.max.z > bz + eps);
+}
+
+
 void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 	int block_selected = player->blocksInHand[(int)player->selectedSlotItemBar];
 	player->lookDir = Vector3Normalize(Vector3Subtract(player->camera.target, player->camera.position));
@@ -1311,6 +1323,7 @@ void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 	int prec_gx = (int)floorf(player->ray.x);
 	int prec_gy = (int)floorf(player->ray.y);
 	int prec_gz = (int)floorf(player->ray.z);
+
 	
 	for(float i = 0.0; i < MAX_RAY_DISTANCE; i+= STEP_RAY_SIZE){
 		player->ray.x += player->lookDir.x * STEP_RAY_SIZE;
@@ -1322,6 +1335,11 @@ void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 		int gz = (int)floorf(player->ray.z);
 		
 		if(GetBlockGlobal(game->world, gx, gy, gz) != 0){ // I hit it
+			
+			// check block validity 
+			if(prec_gy < 0 || prec_gy >= CHUNK_HEIGTH) break;
+			if(block_selected != WATER && isAroundPlayer(player, prec_gx, prec_gy, prec_gz)) break;
+			
 			int chunkX = (int)floorf((float)prec_gx / CHUNK_SIZE);
 			int chunkZ = (int)floorf((float)prec_gz / CHUNK_SIZE);
 			int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -1625,6 +1643,7 @@ int main(){
 		}
 		if(IsKeyPressed(KEY_F3)){ game->isKeyF3 = !(game->isKeyF3); }
 		if(IsKeyPressed(KEY_F5)){player->isThirdPerson = !player->isThirdPerson;}
+		
 
 		//if(IsKeyDown(KEY_G)) TryMoveAxis(player, game->world, (Vector3){0, -2.0f * dt, 0});
 		if(IsKeyDown(KEY_G)){ 
@@ -1653,7 +1672,8 @@ int main(){
 			DrawFPS(10, 10);
 			DrawText(textCordinates, 10, 30, FONT_SIZE, WHITE);
 			UpdatePlayerStats(player);
-			DrawGUI(gui, ascii, player);
+			if(!IsKeyDown(KEY_F1)){ DrawGUI(gui, ascii, player); }
+			
 			
 			if(game->isKeyF3){ Printplayer(player, game, 0); }
         EndDrawing();
