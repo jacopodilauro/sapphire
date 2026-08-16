@@ -1585,7 +1585,7 @@ int main(){
 	double start_game = GetTime();
 	
     SetTraceLogLevel(LOG_WARNING);
-    InitWindow(WIDTH, HEIGHT, "Minecraft"); 
+    InitWindow(WIDTH, HEIGHT, "Sapphire"); 
     
     Texture2D fnTerrain = LoadTexture("texture/atlas/atlas_terrain.png");
 	Texture2D gui = LoadTexture("texture/atlas/atlas_gui.png");
