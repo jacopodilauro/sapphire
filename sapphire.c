@@ -47,13 +47,13 @@
 
 //CHUNK
 #define CHUNK_SIZE 16 // ATTENZIONE!!!!!!!: changes ? modify -> GetBlockGlobal
-#define CHUNK_HEIGTH 128
+#define CHUNK_HEIGTH 384//128
 #define MAX_CHUNK_FACES (CHUNK_SIZE * CHUNK_HEIGTH * CHUNK_SIZE * 6)
 
 // LAND
 #define HEIGHT_GROUND 126
 #define MIN_MOUNTAIN 35    // min height of land
-#define MAX_MOUNTAIN 100   // max height
+#define MAX_MOUNTAIN 300   // max height
 #define WATER_LEVEL_FIXED 45
 
 #define LOCAL_WORLD_SIZE 17
@@ -930,7 +930,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 */
 				char neighbor = (y == CHUNK_HEIGTH - 1) ? AIR : c->Map[x][y+1][z];				
 				//Upper Face
-                if(neighbor == AIR /* || neighbor == LEAF*/){
+                if(IsTransparent(neighbor) && neighbor != block){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 1.0f; vertici[vCount*3+5] = z + 1.0f;
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f;
@@ -954,7 +954,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //Under Face    
 				neighbor = (y == 0) ? AIR : c->Map[x][y-1][z];
-				if(neighbor == AIR/* || neighbor == LEAF*/){
+				if(IsTransparent(neighbor) && neighbor != block){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 0.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 0.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -978,7 +978,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }                
                 //DX Face ->
 				neighbor = (x == CHUNK_SIZE - 1) ? GetBlockForMesh(world, globalX + 1, y, globalZ) : c->Map[x + 1][y][z];
-                if(neighbor == AIR/* || neighbor == LEAF*/){
+                if(IsTransparent(neighbor) && neighbor != block){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; // Top-Left
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; // Bottom-Left
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; // Top-Right
@@ -996,7 +996,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //SX Face <-
 				neighbor = (x == 0) ? GetBlockForMesh(world, globalX - 1, y, globalZ) : c->Map[x - 1][y][z];
-                if(neighbor == AIR/* || neighbor == LEAF*/){
+                if(IsTransparent(neighbor) && neighbor != block){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f;
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f;
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f;
@@ -1014,7 +1014,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //BACK Face
 				neighbor = (z == CHUNK_SIZE - 1) ? GetBlockForMesh(world, globalX, y, globalZ + 1) : c->Map[x][y][z + 1];
-                if(neighbor == AIR/* || neighbor == LEAF*/){
+                if(IsTransparent(neighbor) && neighbor != block){
                     vertici[vCount*3+0] = x + 0.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 1.0f; 
                     vertici[vCount*3+3] = x + 0.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 1.0f; 
                     vertici[vCount*3+6] = x + 1.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 1.0f; 
@@ -1032,7 +1032,7 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 }
                 //FRONT Face
 				neighbor = (z == 0) ? GetBlockForMesh(world, globalX, y, globalZ - 1) : c->Map[x][y][z - 1];
-                if(neighbor == AIR/* || neighbor == LEAF*/){
+                if(IsTransparent(neighbor) && neighbor != block){
                     vertici[vCount*3+0] = x + 1.0f; vertici[vCount*3+1] = y + 1.0f; vertici[vCount*3+2] = z + 0.0f; 
                     vertici[vCount*3+3] = x + 1.0f; vertici[vCount*3+4] = y + 0.0f; vertici[vCount*3+5] = z + 0.0f; 
                     vertici[vCount*3+6] = x + 0.0f; vertici[vCount*3+7] = y + 1.0f; vertici[vCount*3+8] = z + 0.0f; 
@@ -1420,7 +1420,7 @@ void TryMoveAxis(Player *p, Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vec
 
     if(delta.y != 0.0f){
         if(delta.y < 0.0f) p->isOnGround = true;
-        p->velocity.y = 0.0f;
+        p->velocity.y = 0.5f;
     }
 }
 
