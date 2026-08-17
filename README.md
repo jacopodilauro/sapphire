@@ -2,26 +2,26 @@
 
 ### Windows run/compile
 ```
-gcc -o zapphire.exe zapphire.c -lraylib -lgdi32 -lwinmm
+gcc -o sapphire.exe sapphire.c -lraylib -lgdi32 -lwinmm
 ```
 ```
-.\zapphire.exe
+.\sapphire.exe
 ```
 
 ### Linux run/compile
 
 ```bash
-gcc -o zapphire zapphire.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+gcc -o sapphire sapphire.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 ```
 ```
-./zapphire
+./sapphire
 ```
 
 ### MacOS run/compile
 
 ```bash
-gcc -o zapphire  zapphire.c -lraylib -framework OpenGL -framework Cocoa -framework IOKit
+gcc -o sapphire  sapphire.c -lraylib -framework OpenGL -framework Cocoa -framework IOKit
 ```
 ```
-./zapphire
+./sapphire
 ```
