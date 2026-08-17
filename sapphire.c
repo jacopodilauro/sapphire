@@ -16,6 +16,7 @@
 
 #include <raylib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -96,6 +97,13 @@ float temp_vertici[MAX_CHUNK_FACES * 4 * 3];
 unsigned short temp_indici[MAX_CHUNK_FACES * 6];
 float temp_texcoords[MAX_CHUNK_FACES * 4 * 2];
 
+enum Layer {
+	LAYER_SOLID = 0,
+	LAYER_CUTOU,
+	LAYER_WATER,
+	LAYER_COUNT
+};
+
 enum BlockType {
 	AIR 		= 0,
 	SAND 		= 1,
@@ -143,6 +151,7 @@ typedef struct Chunk{
     int gridZ;
     char Map[CHUNK_SIZE][CHUNK_HEIGTH][CHUNK_SIZE];
     Model model;
+    Model waterModel;
     Vector3 position;
 	bool needRemesh;
 }Chunk; 
@@ -900,7 +909,8 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
     }
 }
 
-void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, int gX, int gZ){
+void BuildFaces(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], 
+						Chunk *c, int gX, int gZ, int *vC, int * iC, int *tC, bool waterBool){
 
 	float *vertici = temp_vertici;
 	unsigned short *indici = temp_indici;
@@ -917,20 +927,16 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
                 char block = c->Map[x][y][z];
 				if(block == AIR) continue;
                 
+if (waterBool) {
+    if (block != WATER && block != LEAF) continue;
+} else {
+    if (block == WATER || block == LEAF) continue;
+}
+				
 				int globalX = (gX * CHUNK_SIZE) + x;
 				int globalZ = (gZ * CHUNK_SIZE) + z;
 								
                 int textureID = BLOCK_TEXTURE[(int)block];
-                /*if(c->Map[x][y][z] == SAND){ textureID = 18; } //sabbia
-                else if(c->Map[x][y][z] == DIRT){ textureID = 2; } // terra
-                else if(c->Map[x][y][z] == GRASS){ textureID = 3; } // erba
-                else if(c->Map[x][y][z] == ROCK){ textureID = 1; } // roccia
-				else if(c->Map[x][y][z] == WATER){ textureID = 207; } // acqua
-				else if(c->Map[x][y][z] == SNOW){ textureID = 66; } // neve
-				else if(c->Map[x][y][z] == BADROCK){ textureID = 17; } // badrock
-				else if(c->Map[x][y][z] == LEAF){ textureID = 52; } // foglie
-				else if(c->Map[x][y][z] == LOG){ textureID = 20; } // tronco
-                */
 				char neighbor = (y == CHUNK_HEIGTH - 1) ? AIR : c->Map[x][y+1][z];				
 				//Upper Face
                 if(IsTransparent(neighbor) && neighbor != block){
@@ -1054,27 +1060,43 @@ void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Chunk *c, i
             }
 		}
 	}
+	
+	*vC = vCount;
+	*iC = iCount;
+	*tC = tCount;	
+}
 
+Model BuildModelFromMesh(int *vCount, int * iCount, int *tCount){
+    if (*vCount == 0) return (Model){0};
 	//MESH - MODEL
     Mesh ChunkMesh = {0};
     Mesh *ptrMesh = &ChunkMesh;
-    ptrMesh -> vertexCount = vCount;
-    ptrMesh -> triangleCount = iCount / 3;
+    ptrMesh -> vertexCount = *vCount;
+    ptrMesh -> triangleCount = *iCount / 3;
     
 	// Allocate only necessary memory for this psecific chunk mesh
-	ptrMesh->vertices = (float*)malloc(vCount * 3 * sizeof(float));
-    ptrMesh->indices = (unsigned short*)malloc(iCount * sizeof(unsigned short));
-    ptrMesh->texcoords = (float*)malloc(tCount * sizeof(float));
+	ptrMesh->vertices = (float*)malloc(*vCount * 3 * sizeof(float));
+    ptrMesh->indices = (unsigned short*)malloc(*iCount * sizeof(unsigned short));
+    ptrMesh->texcoords = (float*)malloc(*tCount * sizeof(float));
     
     // Copy form buffer -> allocated memory
-    memcpy(ptrMesh->vertices, vertici, vCount * 3 * sizeof(float));
-    memcpy(ptrMesh->indices, indici, iCount * sizeof(unsigned short));
-    memcpy(ptrMesh->texcoords, texcoords, tCount * sizeof(float));
+    memcpy(ptrMesh->vertices, temp_vertici, *vCount * 3 * sizeof(float));
+    memcpy(ptrMesh->indices, temp_indici, *iCount * sizeof(unsigned short));
+    memcpy(ptrMesh->texcoords, temp_texcoords, *tCount * sizeof(float));
     UploadMesh(&ChunkMesh, false);
     
     //MODEL    
-    c -> model = LoadModelFromMesh(ChunkMesh); 
-	
+    return LoadModelFromMesh(ChunkMesh); 	
+}
+
+void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], 
+												Chunk *c, int gX, int gZ){
+
+	int vC, iC, tC;
+	BuildFaces(world, c, gX, gZ, &vC, &iC, &tC, false);
+	c->model = BuildModelFromMesh(&vC, &iC, &tC);
+	BuildFaces(world, c, gX, gZ, &vC, &iC, &tC, true);
+	c->waterModel = BuildModelFromMesh(&vC, &iC, &tC);
 }
 
 Model BuildModel(Texture2D tex, float size, float cutX, float cutY, float cutW, float cutH) {
@@ -1124,9 +1146,13 @@ void UpdateChunkGraph(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int cx, i
     if (world[wx][wz].gridX == cx && world[wx][wz].gridZ == cz) {
         if (world[wx][wz].model.meshCount > 0) {
             UnloadModel(world[wx][wz].model);
+            if (world[wx][wz].waterModel.meshCount > 0) 
+				UnloadModel(world[wx][wz].waterModel);
         }
         BuildChunkMesh(world, &world[wx][wz], cx, cz);
         world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+        if (world[wx][wz].waterModel.meshCount > 0)
+			world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
     }
 }
 
@@ -1148,7 +1174,9 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 				// un vecchio chunk ormai lontano
 				if (world[wx][wz].gridX != gx || world[wx][wz].gridZ != gz) {
 					if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
+					if (world[wx][wz].waterModel.meshCount > 0) UnloadModel(world[wx][wz].waterModel);
 					world[wx][wz].model = (Model){0};
+					world[wx][wz].waterModel = (Model){0};
 					world[wx][wz].needRemesh = false;
 					
 					dataQueueGX[dataTail] = gx;
@@ -1214,14 +1242,20 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 		BuildChunkMesh(world, &world[wx][wz], gx, gz);
 		
 		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+		if (world[wx][wz].waterModel.meshCount > 0)
+			world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
 	} /*else {*/
 			
 	for (int wx = 0; wx < LOCAL_WORLD_SIZE && meshBudget > 0; wx++) {
 		for (int wz = 0; wz < LOCAL_WORLD_SIZE && meshBudget > 0; wz++) {
 			if (world[wx][wz].needRemesh) {
+				if (world[wx][wz].waterModel.meshCount > 0) 
+					UnloadModel(world[wx][wz].waterModel);
 				UnloadModel(world[wx][wz].model);
 				BuildChunkMesh(world, &world[wx][wz], world[wx][wz].gridX, world[wx][wz].gridZ);
 				world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+				if (world[wx][wz].waterModel.meshCount > 0)
+					world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
 				world[wx][wz].needRemesh = false;
 				meshBudget--;
 			}
@@ -1265,6 +1299,8 @@ void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D f
             
             BuildChunkMesh(world, &world[wx][wz], gx, gz);
             world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+            if (world[wx][wz].waterModel.meshCount > 0)
+				world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
         }
     }
 }
@@ -1658,6 +1694,7 @@ int main(){
             ClearBackground(GetSkyColor(game->time.timeOfDay));
 			
             BeginMode3D(player->camera);
+            	// Draw Terrain
             	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
 						if(IsInRange(player, game, wx, wz)){
@@ -1670,6 +1707,16 @@ int main(){
 				
 				DrawSun(&player->camera.position, &game->time, sunModel, moonModel);			
 				if(game->isKeyF3){ DrawBoundingBox(player->playerBox, RED);}
+				
+				
+				// Draw Water
+				for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
+					for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
+						if (IsInRange(player, game, wx, wz) && game->world[wx][wz].waterModel.meshCount > 0) {
+							DrawModel(game->world[wx][wz].waterModel, game->world[wx][wz].position, 1.0f, WHITE);
+						}
+					}			
+				}
 			EndMode3D();
 			
 			DrawFPS(10, 10);
@@ -1679,6 +1726,9 @@ int main(){
 			
 			
 			if(game->isKeyF3){ Printplayer(player, game, 0); }
+			
+		
+			
         EndDrawing();
     }
 	
@@ -1693,6 +1743,7 @@ int main(){
     for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
         for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
       		UnloadModel(game->world[wx][wz].model);
+      		if (game->world[wx][wz].waterModel.meshCount > 0) UnloadModel(game->world[wx][wz].waterModel);
      	}
     } 
 
