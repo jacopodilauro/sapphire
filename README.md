@@ -1,27 +1,27 @@
-# SAPPHIRE / MINECRAFT
+# SAPPHIRE
 
 ### Windows run/compile
 ```
-gcc -o minecraft.exe minecraft.c -lraylib -lgdi32 -lwinmm
+gcc -o zapphire.exe zapphire.c -lraylib -lgdi32 -lwinmm
 ```
 ```
-.\minecraft.exe
+.\zapphire.exe
 ```
 
 ### Linux run/compile
 
 ```bash
-gcc -o minecraft minecraft.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+gcc -o zapphire zapphire.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 ```
 ```
-./minecraft
+./zapphire
 ```
 
 ### MacOS run/compile
 
 ```bash
-gcc -o minecraft minecraft.c -lraylib -framework OpenGL -framework Cocoa -framework IOKit
+gcc -o zapphire  zapphire.c -lraylib -framework OpenGL -framework Cocoa -framework IOKit
 ```
 ```
-./minecraft
+./zapphire
 ```
