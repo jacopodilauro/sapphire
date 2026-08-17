@@ -227,7 +227,7 @@ typedef struct CustomCamera{
 
 const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
 			[AIR]  =   0, [SAND] = 18, [DIRT] 	=  2, [GRASS]= 3, [ROCK]= 1,
-			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =52, [LOG] =20,
+			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =53, [LOG] =20,
 			[LEAF_OPAQUE] = 54, [SNOW_GRASS] = 68
 };
 
@@ -1704,19 +1704,15 @@ int main(){
             BeginMode3D(player->camera);
             	// Draw Terrain
             	DrawLayer(player, game, LAYER_SOLID);   
-				// Draw LEAF
-				rlDisableBackfaceCulling();
-					DrawLayer(player, game, LAYER_WATER);
-					
-				rlEnableBackfaceCulling();
-
+				
 				DrawSkin(&player->skin, player->view.yaw);				
 				DrawSun(&player->camera.position, &game->time, sunModel, moonModel);			
 				if(game->isKeyF3){ DrawBoundingBox(player->playerBox, RED);}
-
-				//Draw Water
-				rlDisableBackfaceCulling();
+				
+				// Draw LEAF & Water
+				rlDisableBackfaceCulling();					
 					DrawLayer(player, game, LAYER_CUTOUT);
+					DrawLayer(player, game, LAYER_WATER);
 				rlEnableBackfaceCulling();
 			EndMode3D();
 			
