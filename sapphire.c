@@ -1372,8 +1372,8 @@ void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 		int gy = (int)floorf(player->ray.y);
 		int gz = (int)floorf(player->ray.z);
 		
-		if(GetBlockGlobal(game->world, gx, gy, gz) != 0){ // I hit it
-			
+		char hit = GetBlockGlobal(game->world, gx, gy, gz);
+		if(hit != AIR && hit != WATER){ // I hit it			
 			// check block validity 
 			if(prec_gy < 0 || prec_gy >= CHUNK_HEIGTH) break;
 			if(block_selected != WATER && isAroundPlayer(player, prec_gx, prec_gy, prec_gz)) break;
@@ -1458,7 +1458,7 @@ void TryMoveAxis(Player *p, Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vec
 
     if(delta.y != 0.0f){
         if(delta.y < 0.0f) p->isOnGround = true;
-        p->velocity.y = 0.5f;
+        p->velocity.y = 0.0f;
     }
 }
 
@@ -1664,7 +1664,7 @@ int main(){
 	InizializeWorld(game, chunkPlayerX, chunkPlayerZ, fnTerrain);
 	InitTextureInventary(fnTerrain, player);
 		
-    SetTargetFPS(540); 
+    SetTargetFPS(120); 
     DisableCursor();
 	char textCordinates[128];
     float dt = {0};
