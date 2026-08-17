@@ -15,6 +15,7 @@
 */
 
 #include <raylib.h>
+#include <rlgl.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -99,7 +100,7 @@ float temp_texcoords[MAX_CHUNK_FACES * 4 * 2];
 
 enum Layer {
 	LAYER_SOLID = 0,
-	LAYER_CUTOU,
+	LAYER_CUTOUT,
 	LAYER_WATER,
 	LAYER_COUNT
 };
@@ -150,8 +151,7 @@ typedef struct Chunk{
     int gridX;
     int gridZ;
     char Map[CHUNK_SIZE][CHUNK_HEIGTH][CHUNK_SIZE];
-    Model model;
-    Model waterModel;
+    Model layers[LAYER_COUNT];
     Vector3 position;
 	bool needRemesh;
 }Chunk; 
@@ -227,7 +227,7 @@ typedef struct CustomCamera{
 
 const int BLOCK_TEXTURE[MAX_BLOCK_TYPES] = {
 			[AIR]  =   0, [SAND] = 18, [DIRT] 	=  2, [GRASS]= 3, [ROCK]= 1,
-			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =53, [LOG] =20,
+			[WATER]= 207, [SNOW] = 66, [BADROCK]= 17, [LEAF] =52, [LOG] =20,
 			[LEAF_OPAQUE] = 54, [SNOW_GRASS] = 68
 };
 
@@ -909,8 +909,14 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
     }
 }
 
+int LayerOfBlock(char block){
+    if (block == WATER) return LAYER_WATER;
+    if (block == LEAF)  return LAYER_CUTOUT;
+    return LAYER_SOLID;
+}
+
 void BuildFaces(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], 
-						Chunk *c, int gX, int gZ, int *vC, int * iC, int *tC, bool waterBool){
+						Chunk *c, int gX, int gZ, int *vC, int * iC, int *tC, int layer){
 
 	float *vertici = temp_vertici;
 	unsigned short *indici = temp_indici;
@@ -927,11 +933,7 @@ void BuildFaces(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE],
                 char block = c->Map[x][y][z];
 				if(block == AIR) continue;
                 
-if (waterBool) {
-    if (block != WATER && block != LEAF) continue;
-} else {
-    if (block == WATER || block == LEAF) continue;
-}
+				if (LayerOfBlock(block) != layer) continue;
 				
 				int globalX = (gX * CHUNK_SIZE) + x;
 				int globalZ = (gZ * CHUNK_SIZE) + z;
@@ -1091,12 +1093,11 @@ Model BuildModelFromMesh(int *vCount, int * iCount, int *tCount){
 
 void BuildChunkMesh(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], 
 												Chunk *c, int gX, int gZ){
-
-	int vC, iC, tC;
-	BuildFaces(world, c, gX, gZ, &vC, &iC, &tC, false);
-	c->model = BuildModelFromMesh(&vC, &iC, &tC);
-	BuildFaces(world, c, gX, gZ, &vC, &iC, &tC, true);
-	c->waterModel = BuildModelFromMesh(&vC, &iC, &tC);
+	for(int l = 0; l < LAYER_COUNT; l++){
+		int vC, iC, tC;
+		BuildFaces(world, c, gX, gZ, &vC, &iC, &tC, l);
+		c->layers[l] = BuildModelFromMesh(&vC, &iC, &tC);
+	}
 }
 
 Model BuildModel(Texture2D tex, float size, float cutX, float cutY, float cutW, float cutH) {
@@ -1139,20 +1140,29 @@ Model BuildModel(Texture2D tex, float size, float cutX, float cutY, float cutW, 
     return model;
 }
 
+void UnloadChunkLayers(Chunk *c){
+    for (int l = 0; l < LAYER_COUNT; l++){
+        if (c->layers[l].meshCount > 0) UnloadModel(c->layers[l]);
+        c->layers[l] = (Model){0};
+    }
+}
+
+void SetChunkTexture(Chunk *c, Texture2D tex){
+    for (int l = 0; l < LAYER_COUNT; l++){
+        if (c->layers[l].meshCount > 0)
+            c->layers[l].materials[0].maps[MATERIAL_MAP_ALBEDO].texture = tex;
+    }
+}
+
 void UpdateChunkGraph(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], int cx, int cz, Texture2D fnTerrain) {
     int wx = (cx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
     int wz = (cz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
 
     if (world[wx][wz].gridX == cx && world[wx][wz].gridZ == cz) {
-        if (world[wx][wz].model.meshCount > 0) {
-            UnloadModel(world[wx][wz].model);
-            if (world[wx][wz].waterModel.meshCount > 0) 
-				UnloadModel(world[wx][wz].waterModel);
-        }
+        UnloadChunkLayers(&world[wx][wz]);
+        
         BuildChunkMesh(world, &world[wx][wz], cx, cz);
-        world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-        if (world[wx][wz].waterModel.meshCount > 0)
-			world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+        SetChunkTexture(&world[wx][wz], fnTerrain);
     }
 }
 
@@ -1173,10 +1183,7 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 				// Se lo slot non contiene le coordinate corrette, significa che c'è
 				// un vecchio chunk ormai lontano
 				if (world[wx][wz].gridX != gx || world[wx][wz].gridZ != gz) {
-					if (world[wx][wz].model.meshCount > 0) UnloadModel(world[wx][wz].model);
-					if (world[wx][wz].waterModel.meshCount > 0) UnloadModel(world[wx][wz].waterModel);
-					world[wx][wz].model = (Model){0};
-					world[wx][wz].waterModel = (Model){0};
+					UnloadChunkLayers(&world[wx][wz]);
 					world[wx][wz].needRemesh = false;
 					
 					dataQueueGX[dataTail] = gx;
@@ -1225,7 +1232,7 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 			int nwx = (ngx % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
 			int nwz = (ngz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
 			Chunk *nb = &world[nwx][nwz];
-			if (nb->gridX == ngx && nb->gridZ == ngz && nb->model.meshCount > 0) {
+			if (nb->gridX == ngx && nb->gridZ == ngz && nb->layers[LAYER_SOLID].meshCount > 0) {
 				nb->needRemesh = true;
 			}
 		}
@@ -1241,21 +1248,15 @@ void BuildChunk(Chunk world[LOCAL_WORLD_SIZE][LOCAL_WORLD_SIZE], Vector3 playerP
 
 		BuildChunkMesh(world, &world[wx][wz], gx, gz);
 		
-		world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-		if (world[wx][wz].waterModel.meshCount > 0)
-			world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-	} /*else {*/
+		SetChunkTexture(&world[wx][wz], fnTerrain);
+	}
 			
 	for (int wx = 0; wx < LOCAL_WORLD_SIZE && meshBudget > 0; wx++) {
 		for (int wz = 0; wz < LOCAL_WORLD_SIZE && meshBudget > 0; wz++) {
 			if (world[wx][wz].needRemesh) {
-				if (world[wx][wz].waterModel.meshCount > 0) 
-					UnloadModel(world[wx][wz].waterModel);
-				UnloadModel(world[wx][wz].model);
+				UnloadChunkLayers(&world[wx][wz]);
 				BuildChunkMesh(world, &world[wx][wz], world[wx][wz].gridX, world[wx][wz].gridZ);
-				world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-				if (world[wx][wz].waterModel.meshCount > 0)
-					world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+				SetChunkTexture(&world[wx][wz], fnTerrain);
 				world[wx][wz].needRemesh = false;
 				meshBudget--;
 			}
@@ -1298,9 +1299,7 @@ void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D f
             int wz = (gz % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
             
             BuildChunkMesh(world, &world[wx][wz], gx, gz);
-            world[wx][wz].model.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
-            if (world[wx][wz].waterModel.meshCount > 0)
-				world[wx][wz].waterModel.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = fnTerrain;
+            SetChunkTexture(&world[wx][wz], fnTerrain);
         }
     }
 }
@@ -1403,7 +1402,7 @@ void PlaceBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 }
 
 int IsInRange(Player *player, Game *game, int wx, int wz){
-	if (game->world[wx][wz].model.meshCount == 0) return 0;
+	if (game->world[wx][wz].layers[LAYER_SOLID].meshCount == 0) return 0;
 
 	Vector3 chunkCenter = { game->world[wx][wz].position.x + (CHUNK_SIZE / 2.0f),
 							player->camera.position.y,
@@ -1613,6 +1612,15 @@ void UnloadSkin(Skin *skin){
 	UnloadModel(skin->legR.model);
 }
 
+void DrawLayer(Player *player, Game *game, int layer){
+    for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++){
+        for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++){
+            if (IsInRange(player, game, wx, wz) && game->world[wx][wz].layers[layer].meshCount > 0)
+                DrawModel(game->world[wx][wz].layers[layer], game->world[wx][wz].position, 1.0f, WHITE);
+        }
+    }
+}
+
 int main(){
 
 /*
@@ -1695,28 +1703,21 @@ int main(){
 			
             BeginMode3D(player->camera);
             	// Draw Terrain
-            	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
-        		    for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-						if(IsInRange(player, game, wx, wz)){
-							DrawModel(game->world[wx][wz].model, game->world[wx][wz].position, 1.0f, WHITE);
-						}
-					}
-    			}   
-				//DrawSkinModel(head_TD, body_TD, armR_TD, armL_TD, legR_TD, legL_TD, player->position /*(Vector3){0, 70, 0}*/);
-				DrawSkin(&player->skin, player->view.yaw);
-				
+            	DrawLayer(player, game, LAYER_SOLID);   
+				// Draw LEAF
+				rlDisableBackfaceCulling();
+					DrawLayer(player, game, LAYER_WATER);
+					
+				rlEnableBackfaceCulling();
+
+				DrawSkin(&player->skin, player->view.yaw);				
 				DrawSun(&player->camera.position, &game->time, sunModel, moonModel);			
 				if(game->isKeyF3){ DrawBoundingBox(player->playerBox, RED);}
-				
-				
-				// Draw Water
-				for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
-					for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-						if (IsInRange(player, game, wx, wz) && game->world[wx][wz].waterModel.meshCount > 0) {
-							DrawModel(game->world[wx][wz].waterModel, game->world[wx][wz].position, 1.0f, WHITE);
-						}
-					}			
-				}
+
+				//Draw Water
+				rlDisableBackfaceCulling();
+					DrawLayer(player, game, LAYER_CUTOUT);
+				rlEnableBackfaceCulling();
 			EndMode3D();
 			
 			DrawFPS(10, 10);
@@ -1740,16 +1741,12 @@ int main(){
 	// UNLOAD FEATURES	
 	UnloadSkin(&player->skin);
 	
-    for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++) {
-        for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++) {
-      		UnloadModel(game->world[wx][wz].model);
-      		if (game->world[wx][wz].waterModel.meshCount > 0) UnloadModel(game->world[wx][wz].waterModel);
-     	}
-    } 
+	for (int wx = 0; wx < LOCAL_WORLD_SIZE; wx++)
+		for (int wz = 0; wz < LOCAL_WORLD_SIZE; wz++)
+			UnloadChunkLayers(&game->world[wx][wz]);
 
-	for(int i = 0; i < MAX_BLOCK_TYPES; i++){
+	for(int i = 0; i < MAX_BLOCK_TYPES; i++)
 		UnloadRenderTexture(player->blockIcons[i]);
-	}
 	
     UnloadTexture(fnTerrain);
 	UnloadTexture(gui);
