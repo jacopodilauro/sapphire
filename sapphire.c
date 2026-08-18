@@ -206,8 +206,8 @@ typedef struct Player{
 	unsigned int isCollisioning : 1;
 	unsigned int isOnGround 	: 1;
 	unsigned int isFlying		: 1;
-	unsigned int isThirdPerson 	: 1;
-	
+	unsigned int changeThirdPerson	: 2;
+
 	unsigned int modeOfMovement	: 2; 
 	// 0:static 1:walking 2:running 
 	
@@ -308,7 +308,7 @@ void InitPlayer(struct Player *p, Texture2D skinTex){
 	p->isCollisioning 	= 0;
 	p->isOnGround 		= 0;
 	p->isFlying 		= 1;
-	p->isThirdPerson	= 0;
+	p->changeThirdPerson	= 0;
 
 	p->view.yaw 		= 180.0f;
 	p->view.pitch 		= 0.0f;
@@ -836,7 +836,7 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
 	int octaves = 6;
 	float persistence = 0.5f;
 	float lacunarity = 2.0f; 
-	float scale = 100.0f; // durezza e morbidezza
+	float scale = 150.0f; // durezza e morbidezza
 	
 	memset(c->Map, 0, sizeof(c->Map));
 	//MAP / floor
@@ -1318,8 +1318,9 @@ void DeleteBlockRay(Player *player, Game *game, Texture2D fnTerrain){
 		int gx = (int)floorf(player->ray.x);
 		int gy = (int)floorf(player->ray.y);
 		int gz = (int)floorf(player->ray.z);
-		
-		if(GetBlockGlobal(game->world, gx, gy, gz) != 0){ // hit
+
+	 	char hit = GetBlockGlobal(game->world, gx, gy, gz);
+                if(hit != AIR && hit != WATER){ // I hit it	
 			int chunkX = (int)floorf((float)gx / CHUNK_SIZE);
 			int chunkZ = (int)floorf((float)gz / CHUNK_SIZE);
 			int wx = (chunkX % LOCAL_WORLD_SIZE + LOCAL_WORLD_SIZE) % LOCAL_WORLD_SIZE;
@@ -1521,10 +1522,14 @@ void UpdatePlayer(Game *game, Player *p, float dt){
 							 p->position.y + PLAYER_EYE,
 							 p->position.z };
 
-	if(p->isThirdPerson){
+	if(p->changeThirdPerson == 1){
 		p->camera.position = Vector3Subtract(eye, Vector3Scale(forward, 4.0f));
 		p->camera.target   = eye;
-	} else {
+	}else if(p->changeThirdPerson == 2){
+		p->camera.position = Vector3Subtract(eye, Vector3Scale(forward, -5.0f));
+		p->camera.target   = eye;
+		
+	}else {
 		eye = Vector3Add(eye, Vector3Scale(flat, 3.0f * SKIN_PX));
 		p->camera.position = eye;
 		p->camera.target   = Vector3Add(eye, forward);
@@ -1689,7 +1694,7 @@ int main(){
 			PlaceBlockRay(player, game, fnTerrain);
 		}
 		if(IsKeyPressed(KEY_F3)){ game->isKeyF3 = !(game->isKeyF3); }
-		if(IsKeyPressed(KEY_F5)){player->isThirdPerson = !player->isThirdPerson;}
+		if(IsKeyPressed(KEY_F5)){player->changeThirdPerson = (player->changeThirdPerson + 1) % 3;}
 		
 
 		//if(IsKeyDown(KEY_G)) TryMoveAxis(player, game->world, (Vector3){0, -2.0f * dt, 0});
@@ -1705,9 +1710,17 @@ int main(){
             	// Draw Terrain
             	DrawLayer(player, game, LAYER_SOLID);   
 				
-				DrawSkin(&player->skin, player->view.yaw);				
+				//DrawSkin(&player->skin, player->view.yaw);				
 				DrawSun(&player->camera.position, &game->time, sunModel, moonModel);			
-				if(game->isKeyF3){ DrawBoundingBox(player->playerBox, RED);}
+				if(game->isKeyF3)
+				{ 
+					DrawBoundingBox(player->playerBox, RED);
+					Printplayer(player, game, 0); 
+				}
+				if(!game->isKeyF3)
+				{
+					DrawSkin(&player->skin, player->view.yaw);				
+				}
 				
 				// Draw LEAF & Water
 				rlDisableBackfaceCulling();					
@@ -1716,15 +1729,13 @@ int main(){
 				rlEnableBackfaceCulling();
 			EndMode3D();
 			
+			if(!game->isKeyF3)
+			{
+				DrawGUI(gui, ascii, player); 
+			}
 			DrawFPS(10, 10);
 			DrawText(textCordinates, 10, 30, FONT_SIZE, WHITE);
 			UpdatePlayerStats(player);
-			if(!IsKeyDown(KEY_F1)){ DrawGUI(gui, ascii, player); }
-			
-			
-			if(game->isKeyF3){ Printplayer(player, game, 0); }
-			
-		
 			
         EndDrawing();
     }
