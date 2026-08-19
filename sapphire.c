@@ -60,7 +60,7 @@
 #define MAX_MOUNTAIN 300   // max height
 #define WATER_LEVEL_FIXED 45
 
-#define LOCAL_WORLD_SIZE 17
+#define LOCAL_WORLD_SIZE 21
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
 // PLAYER
@@ -315,7 +315,7 @@ void InitPlayer(struct Player *p, Texture2D skinTex){
 	p->view.sensitivity = 0.15f;
 
 	p->camera.up = (Vector3){0.0f, 1.0f, 0.0f};
-	p->camera.fovy = 60.0f;
+	p->camera.fovy = 72.0f;
 	p->camera.projection = CAMERA_PERSPECTIVE;
 	p->camera.position = (Vector3){ p->position.x, p->position.y + PLAYER_EYE, p->position.z };
 	p->camera.target = Vector3Add(p->camera.position, (Vector3){0.0f, 0.0f, -1.0f});
@@ -1414,7 +1414,7 @@ int IsInRange(Player *player, Game *game, int wx, int wz){
 	if(dist < (CHUNK_SIZE * 2.0f)) return 1;
 	
 	dirToChunk = Vector3Normalize(dirToChunk);
-	if(Vector3DotProduct(player->lookDir, dirToChunk) > - 0.3f) {return 1;}
+	if(Vector3DotProduct(player->camera.target, dirToChunk) > - 0.3f) {return 1;}
 	
 	return 0;
 }
@@ -1643,7 +1643,7 @@ int main(){
 	Texture2D gui = LoadTexture("texture/atlas/atlas_gui.png");
 	Texture2D ascii = LoadTexture("texture/atlas/atlas_ascii.png");
 	Texture2D cielo = LoadTexture("texture/atlas/atlas_celestials.png");
-	Texture2D skinTex_TD = LoadTexture("texture/skin-player/Ari.png");
+	Texture2D skinTex_TD = LoadTexture("texture/skin-player/adventure_guy.png");
 
 	SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
 	SetTextureFilter(gui, TEXTURE_FILTER_POINT);
