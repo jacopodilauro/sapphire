@@ -161,6 +161,8 @@ typedef struct Game{
 	Time time;
 	unsigned int mode  	 	: 1; // CREATIVE (0)/ SURVIVOL(1)
 	unsigned int opt_mode 	: 1; // FAST (0)/ NORMAL (1)
+	unsigned int isKeyF1	: 1;
+	unsigned int isKeyF2	: 1;
 	unsigned int isKeyF3	: 1;
 }Game;
 
@@ -189,7 +191,7 @@ typedef struct Player{
 	CameraController view;
 	Vector3 lookDir;
 	Vector3 ray;
-	
+	float threshold_fovy;	
 	Skin skin;
 	
 	int biome; 
@@ -316,6 +318,7 @@ void InitPlayer(struct Player *p, Texture2D skinTex){
 
 	p->camera.up = (Vector3){0.0f, 1.0f, 0.0f};
 	p->camera.fovy = 72.0f;
+	p->threshold_fovy = cosf((p->camera.fovy / 2) * DEG2RAD);
 	p->camera.projection = CAMERA_PERSPECTIVE;
 	p->camera.position = (Vector3){ p->position.x, p->position.y + PLAYER_EYE, p->position.z };
 	p->camera.target = Vector3Add(p->camera.position, (Vector3){0.0f, 0.0f, -1.0f});
@@ -1276,6 +1279,8 @@ void InizializeWorld(Game *game, int chunkPlayerX, int chunkPlayerZ, Texture2D f
 	InitWorldTime(&game->time);
 	game -> mode = 0;
 	game -> opt_mode = 0;
+	game -> isKeyF1 = 0;
+	game -> isKeyF2 = 0;
 	game -> isKeyF3 = 0;
 	
 	Chunk (*world)[LOCAL_WORLD_SIZE] = game->world;
@@ -1414,7 +1419,12 @@ int IsInRange(Player *player, Game *game, int wx, int wz){
 	if(dist < (CHUNK_SIZE * 2.0f)) return 1;
 	
 	dirToChunk = Vector3Normalize(dirToChunk);
-	if(Vector3DotProduct(player->camera.target, dirToChunk) > - 0.3f) {return 1;}
+
+	Vector3 cameraDir = Vector3Normalize(
+		Vector3Subtract(player->camera.target, player->camera.position)
+		);
+	
+	if(Vector3DotProduct(cameraDir, dirToChunk) > -player->threshold_fovy) {return 1;}
 	
 	return 0;
 }
@@ -1669,7 +1679,7 @@ int main(){
 	InizializeWorld(game, chunkPlayerX, chunkPlayerZ, fnTerrain);
 	InitTextureInventary(fnTerrain, player);
 		
-    SetTargetFPS(120); 
+    SetTargetFPS(540); 
     DisableCursor();
 	char textCordinates[128];
     float dt = {0};
@@ -1694,6 +1704,8 @@ int main(){
 			PlaceBlockRay(player, game, fnTerrain);
 		}
 		if(IsKeyPressed(KEY_F3)){ game->isKeyF3 = !(game->isKeyF3); }
+		if(IsKeyPressed(KEY_F2)){ game->isKeyF2 = !(game->isKeyF2); }
+		if(IsKeyPressed(KEY_F1)){ game->isKeyF1 = !(game->isKeyF1); }
 		if(IsKeyPressed(KEY_F5)){player->changeThirdPerson = (player->changeThirdPerson + 1) % 3;}
 		
 
@@ -1715,9 +1727,8 @@ int main(){
 				if(game->isKeyF3)
 				{ 
 					DrawBoundingBox(player->playerBox, RED);
-					Printplayer(player, game, 0); 
 				}
-				if(!game->isKeyF3)
+				if(!game->isKeyF1)
 				{
 					DrawSkin(&player->skin, player->view.yaw);				
 				}
@@ -1730,6 +1741,10 @@ int main(){
 			EndMode3D();
 			
 			if(!game->isKeyF3)
+			{
+				Printplayer(player, game, 0); 
+			}
+			if(!game->isKeyF1)
 			{
 				DrawGUI(gui, ascii, player); 
 			}
