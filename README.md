@@ -1,5 +1,7 @@
 # SAPPHIRE
 
+![Screenshot](img/img.png)
+
 ### Windows run/compile
 ```
 gcc -o sapphire.exe sapphire.c -lraylib -lgdi32 -lwinmm
