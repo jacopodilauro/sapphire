@@ -1,19 +1,3 @@
-/*								
- [x] inseriamo il volo																	|
- [x] inseriamo il piazzamento e togliemento blocchi										|
- [x] ottimizzare la generazione chunk													|05/08/26 <note: da fare con i threads>
- [x] gui blocchetti nell inventario														|
- [x] poter selzionare blocchi da piazzare												|
- [x] inserisco poi le colisioni 3D														|
- [x] gravità e il salto	 																|
- [x] inseriamo il sole, luna, alberi, montagne											|
- [x] inserisco biomi																	|
- [] inseriamo la terza persona e prima persona. 										|
- [] sezioni																				|
- [] ottimizzazione meshing
- [] update texture
-*/
-
 #include <raylib.h>
 #include <rlgl.h>
 #include <stdio.h>
@@ -60,7 +44,7 @@
 #define MAX_MOUNTAIN 300   // max height
 #define WATER_LEVEL_FIXED 45
 
-#define LOCAL_WORLD_SIZE 21
+#define LOCAL_WORLD_SIZE 29
 #define CHUNK_RADIUS (LOCAL_WORLD_SIZE / 2)
 
 // PLAYER
@@ -893,7 +877,11 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
                         c->Map[x][y][z] = ROCK;
                     } 
                     else { 
-                        if (y == HEIGHTGROUND - 1){ 
+			if (HEIGHTGROUND <= WATER_LEVEL + 4) {
+                            if (y >= HEIGHTGROUND - 3) c->Map[x][y][z] = SAND;
+                            else c->Map[x][y][z] = ROCK;
+                        }
+                        else if (y == HEIGHTGROUND - 1){ 
 							c->Map[x][y][z] = GRASS;
 							if(y == HEIGHTGROUND - 1) { if(x == z && x == CHUNK_SIZE/2)BuildTree( c, x, y, z); }
 						}
@@ -904,6 +892,7 @@ void BuildChunkData(Chunk *c, int gX, int gZ){
             }
 
             if (HEIGHTGROUND <= WATER_LEVEL) {
+		c->Map[x][HEIGHTGROUND - 1][z] = SAND;
                 for (int y = HEIGHTGROUND; y <= WATER_LEVEL; y++) {
                     c->Map[x][y][z] = WATER;
                 }
@@ -1601,14 +1590,14 @@ void Printplayer(Player *player, Game *game, char f){
 				player->isInWater, player->isTakingDamage);
 	DrawText(char_tmp, WIDTH * 0.75, 90, FONT_SIZE, WHITE);
 	
-	// CLOCK
+	/* CLOCK
 	char char_clock[16]; // 6 is enough, but I'm put 16 to avoid warnings
 	int timeOfDay = game->time.timeOfDay;
 	int hours = timeOfDay / 1000;
 	int min_k = timeOfDay % 1000;
 	int min = 60 * min_k / 1000;
 	sprintf(char_clock, "%02d:%02d", hours, min);
-	DrawText(char_clock, (WIDTH / 2) - MeasureText(char_clock, 40), 10, 40, WHITE);  
+	DrawText(char_clock, (WIDTH / 2) - MeasureText(char_clock, 40), 10, 40, WHITE);*/  
 }
 
 void UnloadSkin(Skin *skin){
@@ -1653,7 +1642,7 @@ int main(){
 	Texture2D gui = LoadTexture("texture/atlas/atlas_gui.png");
 	Texture2D ascii = LoadTexture("texture/atlas/atlas_ascii.png");
 	Texture2D cielo = LoadTexture("texture/atlas/atlas_celestials.png");
-	Texture2D skinTex_TD = LoadTexture("texture/skin-player/adventure_guy.png");
+	Texture2D skinTex_TD = LoadTexture("texture/skin-player/guy.png");
 
 	SetTextureFilter(fnTerrain, TEXTURE_FILTER_POINT);
 	SetTextureFilter(gui, TEXTURE_FILTER_POINT);
@@ -1706,7 +1695,7 @@ int main(){
 		if(IsKeyPressed(KEY_F3)){ game->isKeyF3 = !(game->isKeyF3); }
 		if(IsKeyPressed(KEY_F2)){ game->isKeyF2 = !(game->isKeyF2); }
 		if(IsKeyPressed(KEY_F1)){ game->isKeyF1 = !(game->isKeyF1); }
-		if(IsKeyPressed(KEY_F5)){player->changeThirdPerson = (player->changeThirdPerson + 1) % 3;}
+		if(IsKeyPressed(KEY_V)){player->changeThirdPerson = (player->changeThirdPerson + 1) % 3;}
 		
 
 		//if(IsKeyDown(KEY_G)) TryMoveAxis(player, game->world, (Vector3){0, -2.0f * dt, 0});
@@ -1740,7 +1729,7 @@ int main(){
 				rlEnableBackfaceCulling();
 			EndMode3D();
 			
-			if(!game->isKeyF3)
+			if(game->isKeyF3)
 			{
 				Printplayer(player, game, 0); 
 			}
