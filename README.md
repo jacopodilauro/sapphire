@@ -1,6 +1,6 @@
 # SAPPHIRE
 
-![Screenshot](img/img.png)
+![Screenshot](img/Screenshot.png)
 
 ### Windows run/compile
 ```
